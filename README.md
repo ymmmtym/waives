@@ -67,7 +67,62 @@ cp -r build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/
 cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~/.clap/
 ```
 
-## 3. 信号処理
+## 3. インストール（プラグインを DAW から使えるようにする）
+
+ビルドしただけでは DAW の一覧に出ない。ホストが探すディレクトリに置く必要がある。
+
+### Linux（ユーザー単位・sudo 不要）
+
+```bash
+./scripts/install-linux.sh
+```
+
+これで以下にコピーされる:
+
+| 形式 | 置き場所 |
+|------|---------|
+| VST3 | `~/.vst3/MyFirstMasteringEQ.vst3` |
+| CLAP | `~/.clap/MyFirstMasteringEQ.clap` |
+| Standalone | `~/.local/bin/MyFirstMasteringEQ` |
+
+システム全体に入れたい場合（要 sudo）:
+
+```bash
+sudo cp -r build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 /usr/local/lib/vst3/
+sudo cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap /usr/local/lib/clap/
+```
+
+ホスト側で再スキャンする（Carla なら再起動、Reaper なら「プラグインを再スキャン」）。
+
+### macOS
+
+```bash
+# AU（Logic 用）
+cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+      ~/Library/Audio/Plug-Ins/Components/
+# VST3 / CLAP
+cp -R build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 \
+      ~/Library/Audio/Plug-Ins/VST3/
+cp -R build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap \
+      ~/Library/Audio/Plug-Ins/CLAP/
+
+# Gatekeeper の隔離属性を外し、ローカル署名を付ける
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
+codesign --force --deep -s - ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
+
+# AU の検証（aufx = エフェクト, Mfmq = PLUGIN_CODE, Myau = 製造元コード）
+auval -v aufx Mfmq Myau
+```
+
+Logic は起動時に AU を再スキャンする。出てこない場合は Logic を終了して
+`killall -9 AudioComponentRegistrar` してから起動し直す。
+
+### ビルド時に自動コピーさせる
+
+`CMakeLists.txt` の `COPY_PLUGIN_AFTER_BUILD FALSE` を `TRUE` にすると、
+ビルドのたびにホストの標準ディレクトリへ自動でコピーされる（開発中は便利）。
+
+## 4. 信号処理
 
 1 バンドのピーキング EQ（biquad）を自前で実装している。
 
@@ -84,7 +139,7 @@ cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~
 `processBlock()` では **メモリ確保・ロック・`std::function` 呼び出しを行わない**。
 係数更新は `std::array<float,5>` の代入だけで完結する。
 
-## 4. テスト
+## 5. テスト
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -101,7 +156,7 @@ pluginval --strictness-level 5 --validate build/MyFirstMasteringEQ_artefacts/Rel
 clap-validator validate build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
 ```
 
-## 5. CMake オプション
+## 6. CMake オプション
 
 | オプション | 既定値 | 意味 |
 |-----------|--------|------|
@@ -113,7 +168,7 @@ clap-validator validate build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstM
 
 macOS では同じ `CMakeLists.txt` が AU も出力する（`if(APPLE)` で追加）。
 
-## 6. macOS で AU をビルドする
+## 7. macOS で AU をビルドする
 
 AU は Apple の AudioUnit SDK と Objective-C++ を使うため **Linux ではビルドできない**
 （クロスコンパイルも macOS SDK が必須で現実的でない）。macOS 上でビルドする:
@@ -149,7 +204,7 @@ Standalone をビルドし、Artifact としてアップロードする。push �
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
 ```
 
-## 7. Carla / DAW での動作確認
+## 8. Carla / DAW での動作確認
 
 ### Carla に読み込む
 
@@ -194,7 +249,7 @@ Carla が CLAP 非対応の場合は VST3 を使う。
 | プラグインが落ちる | ホストとプラグインのバージョン不一致 | `pluginval` で再現するか切り分ける |
 | グラフと音が違う | サンプルレート取得の失敗 | グラフは `getCurrentSampleRate()` を使う。0 のときは 48 kHz で描画 |
 
-## 8. メモ
+## 9. メモ
 
 - ヘッドレス環境でスタンドアローンを起動確認する場合: `xvfb-run -a <binary>`
 - CLAP の `clap-validator` はパラメータが 0 個のプラグインで `param-conversions`
