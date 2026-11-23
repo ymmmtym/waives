@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+
+# FetchContent / JUCE download cache
+.cache/
+
+# IDE / editor
+.vscode/
+.idea/
+*.user
+compile_commands.json
+
+# Agent memory (local only)
+.openhands/
+
+# macOS
+.DS_Store
