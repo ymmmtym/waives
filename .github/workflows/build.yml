@@ -14,17 +14,19 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.plugin }} / ${{ matrix.name }}
+    name: ${{ matrix.plugin }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # Add a plugin here once it appears in WAIVES_PLUGINS in CMakeLists.txt.
+        # A plugin row here is multiplied by every platform row. Add a plugin
+        # once it appears in WAIVES_PLUGINS in CMakeLists.txt.
         plugin: [MyFirstMasteringEQ]
+        platform: [linux, macos]
         include:
-          - name: linux
+          - platform: linux
             os: ubuntu-latest
-          - name: macos
+          - platform: macos
             os: macos-latest
             # Universal AU so it runs natively on both Apple silicon and Intel.
             extra_cmake_args: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"'
@@ -49,7 +51,7 @@ jobs:
           path: .cache/fetchcontent
           # The cache holds generated CMake files with absolute paths, so the two
           # jobs must never share an entry.
-          key: fetchcontent-${{ matrix.name }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: fetchcontent-${{ matrix.platform }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake_args }}
@@ -102,13 +104,13 @@ jobs:
           PLUGIN: ${{ matrix.plugin }}
         run: |
           mkdir -p dist
-          tar -czf "dist/${PLUGIN}-${{ matrix.name }}.tar.gz" \
+          tar -czf "dist/${PLUGIN}-${{ matrix.platform }}.tar.gz" \
               -C "build/plugins/${PLUGIN}" "${PLUGIN}_artefacts/Release"
 
       - name: Upload plugin bundles
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.plugin }}-${{ matrix.name }}
-          path: dist/${{ matrix.plugin }}-${{ matrix.name }}.tar.gz
+          name: ${{ matrix.plugin }}-${{ matrix.platform }}
+          path: dist/${{ matrix.plugin }}-${{ matrix.platform }}.tar.gz
           if-no-files-found: error
           retention-days: 14
