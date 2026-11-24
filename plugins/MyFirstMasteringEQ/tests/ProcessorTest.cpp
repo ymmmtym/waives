@@ -2,75 +2,17 @@
 // processBlock() the plugin uses, without a host or an audio device.
 
 #include "PluginProcessor.h"
+#include "TestUtilities.h"
 
 #include <cmath>
 #include <complex>
 #include <cstdio>
 #include <cstring>
 
+using namespace waives::test;
+
 namespace
 {
-    int failures = 0;
-
-    void check (bool condition, const char* what)
-    {
-        std::printf ("%s  %s\n", condition ? "[ ok ]" : "[FAIL]", what);
-
-        if (! condition)
-            ++failures;
-    }
-
-    bool approxEqual (float a, float b, float tolerance = 1.0e-5f)
-    {
-        return std::abs (a - b) <= tolerance;
-    }
-
-    juce::AudioProcessor::BusesLayout makeLayout (const juce::AudioChannelSet& in,
-                                                  const juce::AudioChannelSet& out)
-    {
-        juce::AudioProcessor::BusesLayout layout;
-        layout.inputBuses.add (in);
-        layout.outputBuses.add (out);
-        return layout;
-    }
-
-    void fillWithSine (juce::AudioBuffer<float>& buffer)
-    {
-        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-        {
-            auto* samples = buffer.getWritePointer (channel);
-
-            for (int i = 0; i < buffer.getNumSamples(); ++i)
-                samples[i] = 0.5f * std::sin (0.05f * (float) (i + channel * 7));
-        }
-    }
-
-    bool buffersMatch (const juce::AudioBuffer<float>& a,
-                       const juce::AudioBuffer<float>& b,
-                       float tolerance = 1.0e-6f)
-    {
-        if (a.getNumChannels() != b.getNumChannels() || a.getNumSamples() != b.getNumSamples())
-            return false;
-
-        for (int channel = 0; channel < a.getNumChannels(); ++channel)
-        {
-            const auto* left  = a.getReadPointer (channel);
-            const auto* right = b.getReadPointer (channel);
-
-            for (int i = 0; i < a.getNumSamples(); ++i)
-            {
-                // A NaN would make the difference comparison false and pass.
-                if (! std::isfinite (left[i]) || ! std::isfinite (right[i]))
-                    return false;
-
-                if (std::abs (left[i] - right[i]) > tolerance)
-                    return false;
-            }
-        }
-
-        return true;
-    }
-
     void setParameterValue (MyFirstMasteringEQAudioProcessor& processor,
                             const char* parameterID,
                             float realValue)
@@ -353,24 +295,18 @@ int main()
         juce::AudioBuffer<float> jumpBuffer (1, longBlock);
         juce::AudioBuffer<float> jumpInput (1, longBlock);
 
-        const auto increment = 2.0 * juce::MathConstants<double>::pi * 1000.0 / rate;
-
-        for (int i = 0; i < longBlock; ++i)
-        {
-            const auto value = (float) std::sin (increment * i);
-            jumpInput.setSample (0, i, value);
-            jumpBuffer.setSample (0, i, value);
-        }
+        fillWithSine (jumpInput, 1000.0, rate);
+        fillWithSine (jumpBuffer, 1000.0, rate);
 
         processor.processBlock (jumpBuffer, midi);
 
-        const auto rmsOver = [] (const juce::AudioBuffer<float>& buffer, int start, int length)
+        const auto rmsOver = [] (const juce::AudioBuffer<float>& audio, int start, int length)
         {
             double sum = 0.0;
 
             for (int i = 0; i < length; ++i)
             {
-                const auto value = (double) buffer.getSample (0, start + i);
+                const auto value = (double) audio.getSample (0, start + i);
                 sum += value * value;
             }
 
@@ -430,10 +366,5 @@ int main()
 
     processor.releaseResources();
 
-    if (failures == 0)
-        std::printf ("\nAll checks passed.\n");
-    else
-        std::printf ("\n%d check(s) failed.\n", failures);
-
-    return failures == 0 ? 0 : 1;
+    return waives::test::report();
 }

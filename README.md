@@ -1,7 +1,21 @@
-# MyFirstMasteringEQ
+# waives
 
-JUCE 製のマスタリング用 EQ プラグイン。Linux では VST3 / CLAP / スタンドアローンをビルドし、
-最終的に macOS で AU をビルドして Logic Pro で使えるようにする。
+JUCE 製オーディオプラグインのモノレポ。プラグインは 1 ディレクトリ 1 本で `plugins/` 以下に並ぶ。
+Linux では VST3 / CLAP / スタンドアローンを、macOS では加えて AU をビルドする。
+
+| プラグイン | 内容 | 形式 |
+|-----------|------|------|
+| [`MyFirstMasteringEQ`](plugins/MyFirstMasteringEQ/) | 1 バンド・ピーキング EQ（マスタリング用） | VST3 / CLAP / Standalone / AU |
+
+```
+plugins/<PluginName>/
+├── CMakeLists.txt       # そのプラグインの差分だけを書く
+├── Source/              # AudioProcessor / PluginEditor / DSP
+└── tests/               # ヘッドレステスト（ctest に自動登録）
+```
+
+共通部分（JUCE の取得、出力フォーマット、警告フラグ、テスト用ハーネス）は
+`CMakeLists.txt` と `cmake/WaivesPlugin.cmake` にまとめてある。
 
 **現在の状態: Step 5 完了** — 1 バンドのピーキング EQ として動作。
 3 パラメータ（Frequency / Gain / Q）、ノブ UI、周波数特性グラフを実装済み。
@@ -53,18 +67,27 @@ JUCE は初回の configure 時に `.cache/fetchcontent/` へダウンロード�
 
 ### 出力物
 
+プラグインごとに `build/plugins/<PluginName>/<Target>_artefacts/Release/` へ出力される。
+`MyFirstMasteringEQ` の場合はこうなる:
+
 | 形式 | パス |
 |------|------|
-| VST3 | `build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3` |
-| CLAP | `build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap` |
-| Standalone | `build/MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringEQ` |
+| VST3 | `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3` |
+| CLAP | `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap` |
+| Standalone | `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringEQ` |
+
+特定のプラグインだけビルドすることもできる:
+
+```bash
+cmake --build build --target MyFirstMasteringEQ_VST3
+```
 
 ### ホストから見えるようにする
 
 ```bash
 mkdir -p ~/.vst3 ~/.clap
-cp -r build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/.vst3/
-cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~/.clap/
+cp -r build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/.vst3/
+cp    build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~/.clap/
 ```
 
 ## 3. インストール（プラグインを DAW から使えるようにする）
@@ -77,7 +100,11 @@ cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~
 ./scripts/install-linux.sh
 ```
 
-これで以下にコピーされる:
+`build/` 以下にある `*_artefacts/Release` をすべて探してインストールするので、
+プラグインが増えてもスクリプトの変更は不要。特定のビルドディレクトリを使う場合は
+`./scripts/install-linux.sh build-clang` のように渡す。
+
+これで以下にコピーされる（例: `MyFirstMasteringEQ`）:
 
 | 形式 | 置き場所 |
 |------|---------|
@@ -88,8 +115,8 @@ cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap  ~
 システム全体に入れたい場合（要 sudo）:
 
 ```bash
-sudo cp -r build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 /usr/local/lib/vst3/
-sudo cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap /usr/local/lib/clap/
+sudo cp -r build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 /usr/local/lib/vst3/
+sudo cp    build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap /usr/local/lib/clap/
 ```
 
 ホスト側で再スキャンする（Carla なら再起動、Reaper なら「プラグインを再スキャン」）。
@@ -103,12 +130,12 @@ mkdir -p ~/Library/Audio/Plug-Ins/Components \
          ~/Library/Audio/Plug-Ins/CLAP
 
 # AU（Logic 用）
-cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+cp -R build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
       ~/Library/Audio/Plug-Ins/Components/
 # VST3 / CLAP
-cp -R build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 \
+cp -R build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 \
       ~/Library/Audio/Plug-Ins/VST3/
-cp -R build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap \
+cp -R build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap \
       ~/Library/Audio/Plug-Ins/CLAP/
 
 # Gatekeeper の隔離属性を外し、ローカル署名を付ける
@@ -161,21 +188,20 @@ ctest --test-dir build --output-on-failure
 ホスト互換性の検証（任意）:
 
 ```bash
-pluginval --strictness-level 5 --validate build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3
-clap-validator validate build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
+pluginval --strictness-level 5 --validate build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3
+clap-validator validate build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
 ```
 
 ## 6. CMake オプション
 
 | オプション | 既定値 | 意味 |
 |-----------|--------|------|
-| `MYEQ_BUILD_CLAP` | `ON` | CLAP 形式をビルドする |
-| `MYEQ_BUILD_TESTS` | `ON` | ヘッドレステストをビルドする |
+| `WAIVES_BUILD_CLAP` | `ON` | CLAP 形式をビルドする |
+| `WAIVES_BUILD_TESTS` | `ON` | ヘッドレステストをビルドする |
 
-出力形式は `CMakeLists.txt` の `MYEQ_PLUGIN_FORMATS` 変数で決まる
-（Linux: `VST3 Standalone`、macOS では `AU` が追加される）。
-
-macOS では同じ `CMakeLists.txt` が AU も出力する（`if(APPLE)` で追加）。
+出力形式は `cmake/WaivesPlugin.cmake` の `waives_add_plugin()` が決める
+（Linux: `VST3 Standalone`、macOS では `if(APPLE)` で `AU` が追加される）。
+各プラグインは形式を書かなくてよい。
 
 ## 7. macOS で AU をビルドする
 
@@ -188,12 +214,12 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel
 ```
 
-出力: `build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component`
+出力: `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component`
 
 ```bash
 # Logic から見えるようにする
 mkdir -p ~/Library/Audio/Plug-Ins/Components
-cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+cp -R build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
       ~/Library/Audio/Plug-Ins/Components/
 
 # Apple 純正のバリデータで確認（aufx = effect, Mfmq = PLUGIN_CODE, Myau = 製造元コード）
@@ -211,9 +237,9 @@ Standalone をビルドし、Artifact としてアップロードする。push �
 
 ```bash
 # 展開先はこの後のコマンドが参照するパスに合わせる
-mkdir -p build/MyFirstMasteringEQ_artefacts
-tar -xzf MyFirstMasteringEQ-macos.tar.gz -C build/MyFirstMasteringEQ_artefacts
-# → build/MyFirstMasteringEQ_artefacts/Release/ に AU / VST3 / CLAP / Standalone
+mkdir -p build/plugins/MyFirstMasteringEQ
+tar -xzf MyFirstMasteringEQ-macos.tar.gz -C build/plugins/MyFirstMasteringEQ
+# → build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/ に AU / VST3 / CLAP / Standalone
 ```
 
 ダウンロードした `.component` は quarantine 属性が付くので、配置前に外す:
@@ -233,11 +259,11 @@ carla
 
 1. Carla 起動 → **Engine → Engine driver** を `JACK` か `ALSA` にする
 2. 左の **Add Plugin → VST3** から
-   `build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3` を選ぶ
+   `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3` を選ぶ
 3. プラグインの GUI が開くので、ノブを回すと周波数特性グラフが追従することを確認
 4. Carla の **Patchbay** タブで「音源 → MyFirstMasteringEQ → 出力」と配線する
 
-CLAP 版は `build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap`。
+CLAP 版は `build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap`。
 Carla が CLAP 非対応の場合は VST3 を使う。
 
 ### 効果を耳で確認する
@@ -260,7 +286,7 @@ Carla が CLAP 非対応の場合は VST3 を使う。
 
 | 症状 | 原因 | 対処 |
 |------|------|------|
-| Carla の一覧にプラグインが出ない | VST3 の探索パスに入っていない | `~/.vst3/` にシンボリックリンクを張る: `ln -s "$PWD/build/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3" ~/.vst3/` |
+| Carla の一覧にプラグインが出ない | VST3 の探索パスに入っていない | `~/.vst3/` にシンボリックリンクを張る: `ln -s "$PWD/build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3" ~/.vst3/` |
 | 読み込めるが音が出ない | ホスト側の配線（Patchbay）が未接続 | 音源 → プラグイン → 出力を配線する |
 | ノブを回すとノイズ | （この実装では起きない想定）スムージングが効いていない | `prepareToPlay` で `SmoothedValue::reset()` を呼んでいるか確認 |
 | 音が割れる | 上げすぎ | Gain は ±18 dB まで。マスタリング用途では ±3 dB 程度から始める |
@@ -272,3 +298,76 @@ Carla が CLAP 非対応の場合は VST3 を使う。
 - ヘッドレス環境でスタンドアローンを起動確認する場合: `xvfb-run -a <binary>`
 - CLAP の `clap-validator` はパラメータが 0 個のプラグインで `param-conversions`
   テストがバリデータ側のゼロ除算でクラッシュする（Step 3 でパラメータを追加すると解消）。
+
+## 10. プラグインを追加する
+
+既存のプラグインをコピーするのが早い。以下は `MyFirstMasteringEQ` を雛形にする例。
+
+### 1. ディレクトリを作る
+
+```bash
+cp -r plugins/MyFirstMasteringEQ plugins/MySecondPlugin
+rm -rf plugins/MySecondPlugin/build
+```
+
+### 2. ソースを書き換える
+
+- `Source/PluginProcessor.h/.cpp` のクラス名（`MyFirstMasteringEQAudioProcessor`）
+- `Source/PluginEditor.h/.cpp`
+- `Source/PluginProcessor.cpp` の `createPluginFilter()` が返す型
+- パラメータ ID は **プラグインごとに固有**にする（`ParamIDs` 名前空間）
+
+### 3. `plugins/MySecondPlugin/CMakeLists.txt` を直す
+
+```cmake
+waives_add_plugin(MySecondPlugin
+    COMPANY_NAME      "MyAudioLab"
+    BUNDLE_ID         "com.myaudiolab.mysecondplugin"
+    MANUFACTURER_CODE Myau        # 製造元コードは共通でよい
+    PLUGIN_CODE       Msnd        # ← 必ず他と違う 4 文字にする
+    DESCRIPTION       "..."
+    CLAP_ID           "com.myaudiolab.mysecondplugin"
+    CLAP_FEATURES     audio-effect
+    SOURCES           ${MYEQ_SOURCES}
+    LINK_LIBRARIES
+        juce::juce_audio_utils
+        juce::juce_dsp)
+
+waives_add_plugin_tests(MySecondPluginTests
+    TEST_SOURCE  tests/ProcessorTest.cpp
+    SOURCES      ${MYEQ_SOURCES}
+    INCLUDE_DIRS Source
+    LINK_LIBRARIES
+        juce::juce_audio_utils
+        juce::juce_dsp)
+```
+
+`PLUGIN_CODE` が重複していると configure 時にエラーで止まる（AU の識別子なので重複不可）。
+
+### 4. ルートの `CMakeLists.txt` に登録する
+
+```cmake
+set(WAIVES_PLUGINS
+    MyFirstMasteringEQ
+    MySecondPlugin)      # ← 追加
+```
+
+### 5. CI のマトリクスに追加する
+
+`.github/workflows/build.yml` の `matrix.plugin` に `MySecondPlugin` を足すと、
+Linux / macOS の両方でビルド・テスト・`auval` が走る。
+
+### 6. テストを書く
+
+`tests/TestUtilities.h` の `check()` / `buffersMatch()` / `fillWithSine()` を再利用できる。
+`waives_add_plugin_tests()` が `ctest` に自動登録するので、`ctest --test-dir build` で
+全プラグインのテストがまとめて走る。
+
+### 7. ビルドと確認
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+./scripts/install-linux.sh
+```
