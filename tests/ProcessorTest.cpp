@@ -329,6 +329,23 @@ int main()
     check (std::isfinite (boostDb) && std::isfinite (cutDb) && std::isfinite (narrowDb),
            "filter output stays finite");
 
+    // A biquad at unity gain is only mathematically transparent; on FMA hardware
+    // the rounding is visible. The processor must bypass it bit-exactly.
+    {
+        setParameterValue (processor, ParamIDs::gain, 0.0f);
+        processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+
+        juce::AudioBuffer<float> bypassBuffer (2, blockSize);
+        fillWithSine (bypassBuffer);
+        const juce::AudioBuffer<float> bypassReference (bypassBuffer);
+
+        processor.processBlock (bypassBuffer, midi);
+
+        check (buffersMatch (bypassBuffer, bypassReference, 0.0f),
+               "0 dB is a bit-exact pass-through");
+    }
+
     // The frequency-response graph uses this analytic |H(e^jw)| formula; it must
     // agree with what the audio path actually measures, or the graph lies.
     {

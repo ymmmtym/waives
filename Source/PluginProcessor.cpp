@@ -124,6 +124,22 @@ void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
         return;
 
     // Never let the centre reach Nyquist: the biquad math degenerates there.
+    // At unity gain the biquad is only mathematically transparent: on hardware
+    // with fused multiply-add (Apple silicon) the residual is not bit-exact, so
+    // snap to an exact pass-through instead. The audible difference at this
+    // threshold is below 0.001 dB.
+    constexpr float transparentThresholdDb = 1.0e-3f;
+
+    if (std::abs (smoothedGainDb.getCurrentValue()) < transparentThresholdDb)
+    {
+        const std::array<float, 5> identity { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
+        for (auto& filter : filters)
+            filter.setCoefficients (identity);
+
+        return;
+    }
+
     const auto frequency = juce::jlimit (20.0f, (float) (sampleRate * 0.45),
                                          smoothedFrequency.getCurrentValue());
     const auto q = juce::jmax (0.05f, smoothedQ.getCurrentValue());
