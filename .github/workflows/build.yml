@@ -57,10 +57,31 @@ jobs:
       - name: Validate AU
         if: runner.os == 'macOS'
         run: |
-          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          set -x
+          component="$HOME/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component"
+          mkdir -p "$(dirname "$component")"
+          rm -rf "$component"
           cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
-                ~/Library/Audio/Plug-Ins/Components/
-          auval -v aufx Mfmq Myau
+                "$(dirname "$component")/"
+
+          # arm64 macOS refuses to load unsigned code, and the audio component
+          # registry only picks the bundle up after it is restarted.
+          codesign --force --deep -s - "$component"
+          xattr -dr com.apple.quarantine "$component" || true
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+
+          auval -a 2>&1 | grep -i mfmq || echo "component not listed by auval -a"
+
+          for attempt in 1 2 3; do
+            if auval -v aufx Mfmq Myau; then
+              exit 0
+            fi
+            echo "auval attempt $attempt failed, restarting the registrar"
+            killall -9 AudioComponentRegistrar || true
+            sleep 5
+          done
+          exit 1
 
       - name: Upload plugin bundles
         uses: actions/upload-artifact@v4
