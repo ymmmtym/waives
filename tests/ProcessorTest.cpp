@@ -58,8 +58,14 @@ namespace
             const auto* right = b.getReadPointer (channel);
 
             for (int i = 0; i < a.getNumSamples(); ++i)
+            {
+                // A NaN would make the difference comparison false and pass.
+                if (! std::isfinite (left[i]) || ! std::isfinite (right[i]))
+                    return false;
+
                 if (std::abs (left[i] - right[i]) > tolerance)
                     return false;
+            }
         }
 
         return true;
@@ -328,6 +334,58 @@ int main()
 
     check (std::isfinite (boostDb) && std::isfinite (cutDb) && std::isfinite (narrowDb),
            "filter output stays finite");
+
+    // A 20 ms ramp at 48 kHz is 960 samples. A host block longer than that must
+    // still be smoothed, otherwise the knob jump is applied instantly.
+    {
+        constexpr double rate = 48000.0;
+        constexpr int longBlock = 4096;
+
+        setParameterValue (processor, ParamIDs::frequency, 1000.0f);
+        setParameterValue (processor, ParamIDs::q, 1.0f);
+        setParameterValue (processor, ParamIDs::gain, 0.0f);
+
+        processor.setPlayConfigDetails (1, 1, rate, longBlock);
+        processor.prepareToPlay (rate, longBlock);
+
+        setParameterValue (processor, ParamIDs::gain, 18.0f);   // knob jump
+
+        juce::AudioBuffer<float> jumpBuffer (1, longBlock);
+        juce::AudioBuffer<float> jumpInput (1, longBlock);
+
+        const auto increment = 2.0 * juce::MathConstants<double>::pi * 1000.0 / rate;
+
+        for (int i = 0; i < longBlock; ++i)
+        {
+            const auto value = (float) std::sin (increment * i);
+            jumpInput.setSample (0, i, value);
+            jumpBuffer.setSample (0, i, value);
+        }
+
+        processor.processBlock (jumpBuffer, midi);
+
+        const auto rmsOver = [] (const juce::AudioBuffer<float>& buffer, int start, int length)
+        {
+            double sum = 0.0;
+
+            for (int i = 0; i < length; ++i)
+            {
+                const auto value = (double) buffer.getSample (0, start + i);
+                sum += value * value;
+            }
+
+            return std::sqrt (sum / length);
+        };
+
+        const auto earlyDb = juce::Decibels::gainToDecibels (
+            rmsOver (jumpBuffer, 0, 240) / rmsOver (jumpInput, 0, 240));
+        const auto lateDb = juce::Decibels::gainToDecibels (
+            rmsOver (jumpBuffer, longBlock - 480, 480)
+            / rmsOver (jumpInput, longBlock - 480, 480));
+
+        check (earlyDb < 12.0, "a knob jump is still ramped inside a long block");
+        check (lateDb > 17.0, "the ramp reaches the target by the end of the block");
+    }
 
     // A biquad at unity gain is only mathematically transparent; on FMA hardware
     // the rounding is visible. The processor must bypass it bit-exactly.

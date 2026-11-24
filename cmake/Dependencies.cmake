@@ -17,10 +17,17 @@ set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 set(JUCE_ENABLE_MODULE_SOURCE_GROUPS ON CACHE BOOL "" FORCE)
 
+# DOWNLOAD_EXTRACT_TIMESTAMP was added in CMake 3.24; passing it to an older
+# CMake would make it part of URL_HASH and break configuration.
+set(JUCE_DOWNLOAD_OPTIONS)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    list(APPEND JUCE_DOWNLOAD_OPTIONS DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+endif()
+
 FetchContent_Declare(JUCE
     URL      "https://github.com/juce-framework/JUCE/archive/refs/tags/${JUCE_VERSION}.tar.gz"
     URL_HASH "SHA256=${JUCE_SHA256}"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    ${JUCE_DOWNLOAD_OPTIONS})
 
 # JUCE has no built-in CLAP exporter; clap-juce-extensions adds one on top of
 # any juce_add_plugin() target. Pinned to a commit because it publishes no tags.

@@ -10,8 +10,7 @@
     from what is actually heard.
 */
 class FrequencyResponseCurve final : public juce::Component,
-                                     private juce::AudioProcessorValueTreeState::Listener,
-                                     private juce::AsyncUpdater
+                                     private juce::Timer
 {
 public:
     FrequencyResponseCurve (juce::AudioProcessorValueTreeState& state,
@@ -21,11 +20,21 @@ public:
     void paint (juce::Graphics& g) override;
 
 private:
-    void parameterChanged (const juce::String& parameterID, float newValue) override;
-    void handleAsyncUpdate() override;
+    struct Snapshot
+    {
+        float frequency = 0.0f;
+        float gainDb = 0.0f;
+        float q = 0.0f;
+        double sampleRate = 0.0;
+    };
+
+    void timerCallback() override;
+    Snapshot readSnapshot() const;
+    static bool isDifferent (const Snapshot& a, const Snapshot& b) noexcept;
 
     juce::AudioProcessorValueTreeState& apvts;
     std::function<double()> getSampleRate;
+    Snapshot lastSnapshot;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrequencyResponseCurve)
 };

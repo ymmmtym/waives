@@ -61,26 +61,47 @@ FrequencyResponseCurve::FrequencyResponseCurve (juce::AudioProcessorValueTreeSta
 {
     setInterceptsMouseClicks (false, false);
 
-    for (auto* id : { ParamIDs::frequency, ParamIDs::gain, ParamIDs::q })
-        apvts.addParameterListener (id, this);
+    // Polling keeps the audio thread completely out of this: a parameter
+    // listener would run there and posting a message from it can allocate.
+    lastSnapshot = readSnapshot();
+    startTimerHz (20);
 }
 
 FrequencyResponseCurve::~FrequencyResponseCurve()
 {
-    apvts.removeParameterListener (ParamIDs::frequency, this);
-    apvts.removeParameterListener (ParamIDs::gain, this);
-    apvts.removeParameterListener (ParamIDs::q, this);
-    cancelPendingUpdate();
+    stopTimer();
 }
 
-void FrequencyResponseCurve::parameterChanged (const juce::String&, float)
+FrequencyResponseCurve::Snapshot FrequencyResponseCurve::readSnapshot() const
 {
-    // Automation can call this from the audio thread, so never repaint directly.
-    triggerAsyncUpdate();
+    Snapshot snapshot;
+
+    snapshot.frequency  = apvts.getRawParameterValue (ParamIDs::frequency)->load();
+    snapshot.gainDb     = apvts.getRawParameterValue (ParamIDs::gain)->load();
+    snapshot.q          = apvts.getRawParameterValue (ParamIDs::q)->load();
+    snapshot.sampleRate = getSampleRate();
+
+    return snapshot;
 }
 
-void FrequencyResponseCurve::handleAsyncUpdate()
+bool FrequencyResponseCurve::isDifferent (const Snapshot& a, const Snapshot& b) noexcept
 {
+    constexpr float tolerance = 1.0e-4f;
+
+    return std::abs (a.frequency - b.frequency) > tolerance
+        || std::abs (a.gainDb - b.gainDb) > tolerance
+        || std::abs (a.q - b.q) > tolerance
+        || std::abs (a.sampleRate - b.sampleRate) > 1.0;
+}
+
+void FrequencyResponseCurve::timerCallback()
+{
+    const auto snapshot = readSnapshot();
+
+    if (! isDifferent (snapshot, lastSnapshot))
+        return;
+
+    lastSnapshot = snapshot;
     repaint();
 }
 
@@ -132,9 +153,13 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
     const auto gainDb    = apvts.getRawParameterValue (ParamIDs::gain)->load();
     const auto q         = apvts.getRawParameterValue (ParamIDs::q)->load();
 
+    // The centre is clamped below Nyquist, so the marker has to follow the
+    // clamped value rather than the raw parameter.
+    const auto effectiveFrequency = juce::jlimit (20.0, rate * 0.45, frequency);
+
     const auto raw = juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter (
         rate,
-        (float) juce::jlimit (20.0, rate * 0.45, frequency),
+        (float) effectiveFrequency,
         juce::jmax (0.05f, q),
         juce::Decibels::decibelsToGain (gainDb));
 
@@ -169,7 +194,7 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
     g.strokePath (path, juce::PathStrokeType (2.0f));
 
     // Marker at the centre frequency.
-    const auto markerX = plot.getX() + frequencyToX (juce::jlimit (minimumHz, maximumHz, frequency),
+    const auto markerX = plot.getX() + frequencyToX (juce::jlimit (minimumHz, maximumHz, effectiveFrequency),
                                                     plot.getWidth());
     const auto markerY = plot.getY() + dbToY (juce::jlimit (-maximumDb, maximumDb, gainDb),
                                               plot.getHeight());

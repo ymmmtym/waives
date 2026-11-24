@@ -9,6 +9,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.name }}
@@ -43,7 +46,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/fetchcontent
-          key: fetchcontent-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
+          # The cache holds generated CMake files with absolute paths, so the two
+          # jobs must never share an entry.
+          key: fetchcontent-${{ matrix.name }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake_args }}
@@ -83,10 +88,18 @@ jobs:
           done
           exit 1
 
+      # upload-artifact resets file modes to 0644, which breaks the standalone
+      # binary and the installer's -x check. A tarball keeps the permissions.
+      - name: Package plugin bundles
+        run: |
+          mkdir -p dist
+          tar -czf "dist/MyFirstMasteringEQ-${{ matrix.name }}.tar.gz" \
+              -C build/MyFirstMasteringEQ_artefacts Release
+
       - name: Upload plugin bundles
         uses: actions/upload-artifact@v4
         with:
           name: MyFirstMasteringEQ-${{ matrix.name }}
-          path: build/MyFirstMasteringEQ_artefacts/Release/
+          path: dist/MyFirstMasteringEQ-${{ matrix.name }}.tar.gz
           if-no-files-found: error
           retention-days: 14

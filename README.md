@@ -97,6 +97,11 @@ sudo cp    build/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.cl
 ### macOS
 
 ```bash
+# 形式ごとの置き場所が無い場合は先に作る（初回インストール時）
+mkdir -p ~/Library/Audio/Plug-Ins/Components \
+         ~/Library/Audio/Plug-Ins/VST3 \
+         ~/Library/Audio/Plug-Ins/CLAP
+
 # AU（Logic 用）
 cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
       ~/Library/Audio/Plug-Ins/Components/
@@ -132,7 +137,7 @@ Logic は起動時に AU を再スキャンする。出てこない場合は Log
 | フィルタ構造 | Transposed Direct Form II（`Source/PluginProcessor.h` の `Biquad`） |
 | チャンネル | 左右で独立した状態を持つ（共有しない） |
 | パラメータ取得 | `apvts.getRawParameterValue()` が返す `std::atomic<float>*` を毎ブロック `load()` |
-| スムージング | `juce::SmoothedValue`（20 ms）。移動中だけブロック単位で再チューニング |
+| スムージング | `juce::SmoothedValue`（20 ms）。移動中は 32 サンプル単位で再チューニング（ホストのブロック長に左右されない） |
 | レイテンシ | 0 サンプル |
 | 0 dB 時 | 係数を厳密な恒等写像に差し替えて素通し（±0.001 dB 未満は無処理） |
 
@@ -200,7 +205,13 @@ auval -v aufx Mfmq Myau
 `.github/workflows/build.yml` が GitHub Actions の macOS ランナーで AU / VST3 / CLAP /
 Standalone をビルドし、Artifact としてアップロードする。push 後は
 **Actions → build → 最新の実行 → Artifacts → `MyFirstMasteringEQ-macos`** から
-ダウンロードできる（手動実行は `workflow_dispatch`）。
+ダウンロードできる（手動実行は `workflow_dispatch`）。中身は
+`MyFirstMasteringEQ-macos.tar.gz` なので、展開してから配置する
+（`upload-artifact` はファイルの実行権限を落とすため、tar で包んでいる）:
+
+```bash
+tar -xzf MyFirstMasteringEQ-macos.tar.gz     # Release/ 以下に AU / VST3 / CLAP / Standalone
+```
 
 ダウンロードした `.component` は quarantine 属性が付くので、配置前に外す:
 

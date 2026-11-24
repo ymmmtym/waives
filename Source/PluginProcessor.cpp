@@ -135,7 +135,12 @@ void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
         const std::array<float, 5> identity { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 
         for (auto& filter : filters)
+        {
+            // A leftover z1/z2 from the previous coefficients would leak the old
+            // tail into the first samples, so clear the state on the transition.
+            filter.reset();
             filter.setCoefficients (identity);
+        }
 
         return;
     }
@@ -190,31 +195,53 @@ void MyFirstMasteringEQAudioProcessor::processBlock (juce::AudioBuffer<float>& b
     for (int channel = getTotalNumInputChannels(); channel < numOutputChannels; ++channel)
         buffer.clear (channel, 0, numSamples);
 
-    // 3) Retune the filter only while a parameter is moving, using block-rate
-    //    smoothing. A steady knob costs one isSmoothing() check per block.
+    // 3) One independent biquad per channel; the state must not be shared.
+    const int channelsToProcess = juce::jmin (numOutputChannels, (int) filters.size());
+
+    const auto processRange = [this, &buffer, channelsToProcess] (int start, int length)
+    {
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+        {
+            auto* samples = buffer.getWritePointer (channel) + start;
+            auto& filter = filters[(size_t) channel];
+
+            for (int i = 0; i < length; ++i)
+                samples[i] = filter.processSample (samples[i]);
+        }
+    };
+
+    // 4) Retune only while a parameter is moving. A steady knob costs one
+    //    isSmoothing() check per block.
     smoothedFrequency.setTargetValue (frequencyParameter->load());
     smoothedGainDb.setTargetValue (gainParameter->load());
     smoothedQ.setTargetValue (qParameter->load());
 
-    if (smoothedFrequency.isSmoothing() || smoothedGainDb.isSmoothing() || smoothedQ.isSmoothing())
-    {
-        smoothedFrequency.skip (numSamples);
-        smoothedGainDb.skip (numSamples);
-        smoothedQ.skip (numSamples);
+    const bool isSmoothing = smoothedFrequency.isSmoothing()
+                          || smoothedGainDb.isSmoothing()
+                          || smoothedQ.isSmoothing();
 
-        updateFilterCoefficients();
+    if (! isSmoothing)
+    {
+        processRange (0, numSamples);
     }
-
-    // 4) One independent biquad per channel; the state must not be shared.
-    const int channelsToProcess = juce::jmin (numOutputChannels, (int) filters.size());
-
-    for (int channel = 0; channel < channelsToProcess; ++channel)
+    else
     {
-        auto* samples = buffer.getWritePointer (channel);
-        auto& filter = filters[(size_t) channel];
+        // Advance the ramp in bounded steps instead of once per host block: a
+        // block longer than the ramp would otherwise jump straight to the target
+        // and the smoothing would never be heard.
+        constexpr int maximumRetuneInterval = 32;
 
-        for (int i = 0; i < numSamples; ++i)
-            samples[i] = filter.processSample (samples[i]);
+        for (int start = 0; start < numSamples; start += maximumRetuneInterval)
+        {
+            const int length = juce::jmin (maximumRetuneInterval, numSamples - start);
+
+            smoothedFrequency.skip (length);
+            smoothedGainDb.skip (length);
+            smoothedQ.skip (length);
+            updateFilterCoefficients();
+
+            processRange (start, length);
+        }
     }
 
     activeChannels.store (numOutputChannels, std::memory_order_relaxed);
