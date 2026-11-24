@@ -145,13 +145,15 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
                     juce::Justification::centred, false);
     }
 
-    // Build the curve from the live parameter values.
-    const auto sampleRate = getSampleRate();
-    const auto rate = sampleRate > 0.0 ? sampleRate : 48000.0;
+    // Draw the snapshot the repaint decision was made from, not the live
+    // values: paint() runs later and could otherwise show a transient state
+    // that no further repaint is scheduled for.
+    const auto& snapshot = lastSnapshot;
+    const auto rate = snapshot.sampleRate > 0.0 ? snapshot.sampleRate : 48000.0;
 
-    const auto frequency = (double) apvts.getRawParameterValue (ParamIDs::frequency)->load();
-    const auto gainDb    = apvts.getRawParameterValue (ParamIDs::gain)->load();
-    const auto q         = apvts.getRawParameterValue (ParamIDs::q)->load();
+    const auto frequency = (double) snapshot.frequency;
+    const auto gainDb    = snapshot.gainDb;
+    const auto q         = snapshot.q;
 
     // The centre is clamped below Nyquist, so the marker has to follow the
     // clamped value rather than the raw parameter.

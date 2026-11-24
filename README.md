@@ -210,7 +210,10 @@ Standalone をビルドし、Artifact としてアップロードする。push �
 （`upload-artifact` はファイルの実行権限を落とすため、tar で包んでいる）:
 
 ```bash
-tar -xzf MyFirstMasteringEQ-macos.tar.gz     # Release/ 以下に AU / VST3 / CLAP / Standalone
+# 展開先はこの後のコマンドが参照するパスに合わせる
+mkdir -p build/MyFirstMasteringEQ_artefacts
+tar -xzf MyFirstMasteringEQ-macos.tar.gz -C build/MyFirstMasteringEQ_artefacts
+# → build/MyFirstMasteringEQ_artefacts/Release/ に AU / VST3 / CLAP / Standalone
 ```
 
 ダウンロードした `.component` は quarantine 属性が付くので、配置前に外す:
