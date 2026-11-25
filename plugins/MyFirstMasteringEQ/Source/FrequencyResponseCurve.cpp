@@ -52,9 +52,9 @@ FrequencyResponseCurve::Snapshot FrequencyResponseCurve::readSnapshot() const
 {
     Snapshot snapshot;
 
-    snapshot.frequency  = apvts.getRawParameterValue (ParamIDs::frequency)->load();
-    snapshot.gainDb     = apvts.getRawParameterValue (ParamIDs::gain)->load();
-    snapshot.q          = apvts.getRawParameterValue (ParamIDs::q)->load();
+    snapshot.frequency  = apvts.getRawParameterValue (ParamIDs::frequency[0])->load();
+    snapshot.gainDb     = apvts.getRawParameterValue (ParamIDs::gain[0])->load();
+    snapshot.q          = apvts.getRawParameterValue (ParamIDs::q[0])->load();
     snapshot.sampleRate = getSampleRate();
 
     return snapshot;

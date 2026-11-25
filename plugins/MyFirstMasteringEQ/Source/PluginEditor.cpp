@@ -49,7 +49,7 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
-    statusLabel.setText ("Single-band peaking EQ", juce::dontSendNotification);
+    statusLabel.setText ("Band 1 of 4", juce::dontSendNotification);
     statusLabel.setFont (juce::Font (juce::FontOptions (14.0f)));
     statusLabel.setColour (juce::Label::textColourId, textSecondary);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -79,11 +79,11 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 
     addAndMakeVisible (curve);
 
-    configureKnob (frequencySlider, ParamIDs::frequency, "Frequency",
+    configureKnob (frequencySlider, ParamIDs::frequency[0], "Frequency",
                    "Boost or cut around this frequency. Logarithmic from 20 Hz to 20 kHz.");
-    configureKnob (gainSlider, ParamIDs::gain, "Gain",
+    configureKnob (gainSlider, ParamIDs::gain[0], "Gain",
                    "How much to boost or cut, in dB. Mastering moves usually stay within +/- 3 dB.");
-    configureKnob (qSlider, ParamIDs::q, "Q",
+    configureKnob (qSlider, ParamIDs::q[0], "Q",
                    "Sharpness of the bell. Higher Q affects a narrower band.");
 
     for (int program = 0; program < processorRef.getNumPrograms(); ++program)
@@ -112,9 +112,9 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 
     // The attachments copy the parameter's range (including its skew) into the
     // slider, so Frequency and Q are logarithmic without extra work here.
-    frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency, frequencySlider);
-    gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain,      gainSlider);
-    qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q,         qSlider);
+    frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency[0], frequencySlider);
+    gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain[0],      gainSlider);
+    qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q[0],         qSlider);
     bypassAttachment    = std::make_unique<ButtonAttachment> (apvts, ParamIDs::bypass,    bypassButton);
 
     setSize (480, 500);

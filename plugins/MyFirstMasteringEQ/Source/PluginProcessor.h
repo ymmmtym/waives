@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PeakResponse.h"
+
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
@@ -10,9 +12,15 @@
 // must never change once a version has been released.
 namespace ParamIDs
 {
-    inline constexpr const char* frequency = "freq";
-    inline constexpr const char* gain      = "gain";
-    inline constexpr const char* q         = "q";
+    inline constexpr int numBands = waives::peak::maxBands;
+
+    // Band 1 keeps the unsuffixed IDs released in v0.1.0, so a session saved by
+    // the one-band build restores into band 1 with no migration; bands 2..4
+    // append their number.
+    inline constexpr std::array<const char*, numBands> frequency { "freq", "freq2", "freq3", "freq4" };
+    inline constexpr std::array<const char*, numBands> gain      { "gain", "gain2", "gain3", "gain4" };
+    inline constexpr std::array<const char*, numBands> q         { "q",    "q2",    "q3",    "q4" };
+
     // Added after the first release, so it goes last: hosts match automation by
     // parameter index within the same version hint.
     inline constexpr const char* bypass    = "bypass";
@@ -97,6 +105,28 @@ private:
         float z1 = 0.0f, z2 = 0.0f;
     };
 
+    // One band of the serial chain: its three parameters, the ramp that keeps
+    // knob moves click-free, and the biquad per channel.
+    struct BandState
+    {
+        std::atomic<float>* frequencyParameter = nullptr;
+        std::atomic<float>* gainParameter      = nullptr;
+        std::atomic<float>* qParameter         = nullptr;
+
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFrequency;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedGainDb;
+        juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedQ;
+
+        std::array<Biquad, 2> filters;
+
+        bool isSmoothing() const noexcept
+        {
+            return smoothedFrequency.isSmoothing()
+                || smoothedGainDb.isSmoothing()
+                || smoothedQ.isSmoothing();
+        }
+    };
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void updateFilterCoefficients() noexcept;
     void processChunk (juce::AudioBuffer<float>& buffer, int start, int length, int channelsToProcess);
@@ -104,19 +134,10 @@ private:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    // Read-only views of the APVTS atomics: safe to load from the audio thread.
-    std::atomic<float>* frequencyParameter = nullptr;
-    std::atomic<float>* gainParameter = nullptr;
-    std::atomic<float>* qParameter = nullptr;
     std::atomic<float>* bypassParameter = nullptr;
 
-    std::array<Biquad, 2> filters;
-
-    // Smoothing keeps a knob move from producing a click: the filter is retuned
-    // once per block with a slowly moving value instead of jumping.
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFrequency;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedGainDb;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedQ;
+    // The bands run in series: band 0 feeds band 1, and so on.
+    std::array<BandState, ParamIDs::numBands> bands;
 
     // 1 = fully processed, 0 = fully bypassed. Fading between the two instead of
     // switching keeps a bypass click out of the master bus.
