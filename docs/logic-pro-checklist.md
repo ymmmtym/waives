@@ -22,14 +22,19 @@ for p in ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component \
          ~/Applications/MyFirstMasteringEQ.app /Applications/MyFirstMasteringEQ.app; do
     if [ -e "$p" ]; then
         # 途中で失敗した .bak を残さない。失敗したら検証そのものを中止する
-        rm -rf "$p.bak"
-        cp -R "$p" "$p.bak" || { echo "backup failed: $p" >&2; exit 1; }
+        rm -rf "$p.bak" || { echo "cannot clear $p.bak" >&2; exit 1; }
+        if ! cp -R "$p" "$p.bak"; then
+            rm -rf "$p.bak"
+            echo "backup failed: $p" >&2
+            exit 1
+        fi
     fi
 done
 ```
 
 バックアップに失敗した状態で先に進むと、後片付けで元のバンドルを消して
-中途半端なコピーを戻すことになる。`cp` が失敗したらここで止める。
+中途半端なコピーを戻すことになる。`cp` が失敗したら、書きかけの `.bak` を消して
+ここで止める。
 
 ```bash
 git clone https://github.com/ymmmtym/waives.git
