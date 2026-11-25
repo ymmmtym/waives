@@ -1004,12 +1004,6 @@ int main()
                 check (curve->getBounds().getHeight() > 0,
                        "the layout survives the largest size");
 
-                // Closing the window must not leave a band soloed.
-                editorProcessor.setSoloBand (2);
-                editor.reset();
-
-                check (editorProcessor.getSoloBand() == -1, "closing the editor clears the solo");
-
                 // The node is drawn at the Nyquist-clamped frequency, which is below
                 // the parameter at low sample rates. A gain-only drag must not carry
                 // that drawn value back into the frequency parameter.
@@ -1028,6 +1022,13 @@ int main()
                        "a gain-only drag keeps a frequency above the Nyquist clamp");
                 check (editorState.getRawParameterValue (ParamIDs::gain[1])->load() > 1.0f,
                        "the same drag still moves the gain");
+
+                // Destroying the editor takes the curve with it, so this has to be
+                // the last thing that touches either of them.
+                editorProcessor.setSoloBand (2);
+                editor.reset();
+
+                check (editorProcessor.getSoloBand() == -1, "closing the editor clears the solo");
 
                 editorProcessor.releaseResources();
             }
