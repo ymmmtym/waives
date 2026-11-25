@@ -276,7 +276,15 @@ void FrequencyResponseCurve::beginNodeDrag (int band)
 
 void FrequencyResponseCurve::dragNodeBy (int band, juce::Point<float> delta)
 {
-    if (band != drag.band)
+    // A mouse-down that missed every node leaves the drag closed, so band and
+    // drag.band can both be -1; that must not reach the parameter arrays.
+    if (! juce::isPositiveAndBelow (band, ParamIDs::numBands) || band != drag.band)
+        return;
+
+    auto* frequencyParameter = apvts.getParameter (ParamIDs::frequency[(size_t) band]);
+    auto* gainParameter = apvts.getParameter (ParamIDs::gain[(size_t) band]);
+
+    if (frequencyParameter == nullptr || gainParameter == nullptr)
         return;
 
     const auto plot = Geometry::plotFor (getLocalBounds().toFloat());
@@ -293,8 +301,8 @@ void FrequencyResponseCurve::dragNodeBy (int band, juce::Point<float> delta)
     const auto dbPerPixel = 2.0f * maximumDb / juce::jmax (1.0f, plot.getHeight());
     const auto gainDb = drag.gainDb - delta.y * dbPerPixel;
 
-    const auto& frequencyRange = apvts.getParameter (ParamIDs::frequency[(size_t) band])->getNormalisableRange();
-    const auto& gainRange = apvts.getParameter (ParamIDs::gain[(size_t) band])->getNormalisableRange();
+    const auto& frequencyRange = frequencyParameter->getNormalisableRange();
+    const auto& gainRange = gainParameter->getNormalisableRange();
 
     setBand (band,
              juce::jlimit ((double) frequencyRange.start, (double) frequencyRange.end, hz),
