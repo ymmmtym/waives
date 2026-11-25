@@ -20,9 +20,16 @@ for p in ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component \
          ~/Library/Audio/Plug-Ins/VST3/MyFirstMasteringEQ.vst3 \
          ~/Library/Audio/Plug-Ins/CLAP/MyFirstMasteringEQ.clap \
          ~/Applications/MyFirstMasteringEQ.app /Applications/MyFirstMasteringEQ.app; do
-    [ -e "$p" ] && cp -R "$p" "$p.bak"
+    if [ -e "$p" ]; then
+        # 途中で失敗した .bak を残さない。失敗したら検証そのものを中止する
+        rm -rf "$p.bak"
+        cp -R "$p" "$p.bak" || { echo "backup failed: $p" >&2; exit 1; }
+    fi
 done
 ```
+
+バックアップに失敗した状態で先に進むと、後片付けで元のバンドルを消して
+中途半端なコピーを戻すことになる。`cp` が失敗したらここで止める。
 
 ```bash
 git clone https://github.com/ymmmtym/waives.git
