@@ -98,6 +98,27 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
         bandButtons[(size_t) band] = std::move (button);
     }
 
+    soloButton.setComponentID ("soloButton");
+    soloButton.setButtonText ("SOLO");
+    soloButton.setClickingTogglesState (true);
+    soloButton.setTooltip ("Listen to the selected band only. Not saved with the session.");
+    soloButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    soloButton.setColour (juce::TextButton::buttonOnColourId, accent);
+    soloButton.setColour (juce::TextButton::textColourOffId, textSecondary);
+    soloButton.setColour (juce::TextButton::textColourOnId, backgroundTop);
+    soloButton.onClick = [this] { setSolo (soloButton.getToggleState()); };
+    addAndMakeVisible (soloButton);
+
+    bandBypassButton.setComponentID ("bandBypassButton");
+    bandBypassButton.setButtonText ("BAND OFF");
+    bandBypassButton.setClickingTogglesState (true);
+    bandBypassButton.setTooltip ("Pass the selected band through untouched; the other bands keep working");
+    bandBypassButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    bandBypassButton.setColour (juce::TextButton::buttonOnColourId, textSecondary.withAlpha (0.35f));
+    bandBypassButton.setColour (juce::TextButton::textColourOffId, textSecondary);
+    bandBypassButton.setColour (juce::TextButton::textColourOnId, textPrimary);
+    addAndMakeVisible (bandBypassButton);
+
     curve.setComponentID ("frequencyResponseCurve");
     curve.onBandSelected = [this] (int band) { selectBand (band); };
     addAndMakeVisible (curve);
@@ -144,6 +165,10 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 MyFirstMasteringEQAudioProcessorEditor::~MyFirstMasteringEQAudioProcessorEditor()
 {
     stopTimer();
+
+    // The solo button owns the state, so closing the window must not leave the
+    // processor soloing a band.
+    processorRef.setSoloBand (-1);
 }
 
 //==============================================================================
@@ -160,6 +185,11 @@ void MyFirstMasteringEQAudioProcessorEditor::selectBand (int band)
 
     curve.setSelectedBand (band);
     updateBandButtons();
+
+    // Solo is a mode: it follows the band being edited rather than staying behind
+    // on the one that was selected before.
+    if (soloButton.getToggleState())
+        setSolo (true);
 
     statusLabel.setText ("Band " + juce::String (band + 1) + " of " + juce::String (ParamIDs::numBands),
                          juce::dontSendNotification);
@@ -178,6 +208,10 @@ void MyFirstMasteringEQAudioProcessorEditor::attachKnobsToBand (int band)
 
     // The attachments copy the parameter's range (including its skew) into the
     // slider, so Frequency and Q are logarithmic without extra work here.
+    bandBypassAttachment.reset();
+    bandBypassAttachment = std::make_unique<ButtonAttachment> (apvts, ParamIDs::bandBypass[index],
+                                                               bandBypassButton);
+
     frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency[index], frequencySlider);
     gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain[index],      gainSlider);
     qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q[index],         qSlider);
@@ -189,6 +223,15 @@ void MyFirstMasteringEQAudioProcessorEditor::attachKnobsToBand (int band)
     configureKnob (qSlider, ParamIDs::q[index], name + " Q",
                    "Sharpness of the bell. Higher Q affects a narrower band; the mouse wheel over "
                    "the graph node does the same thing.");
+}
+
+void MyFirstMasteringEQAudioProcessorEditor::setSolo (bool shouldSolo)
+{
+    const auto band = shouldSolo ? selectedBand : -1;
+
+    processorRef.setSoloBand (band);
+    curve.setSoloBand (band);
+    soloButton.setToggleState (shouldSolo, juce::dontSendNotification);
 }
 
 void MyFirstMasteringEQAudioProcessorEditor::updateBandButtons()
@@ -281,9 +324,14 @@ void MyFirstMasteringEQAudioProcessorEditor::resized()
     auto bandRow = area.removeFromTop (24);
 
     for (auto& button : bandButtons)
-        button->setBounds (bandRow.removeFromLeft (34).reduced (1));
+        button->setBounds (bandRow.removeFromLeft (32).reduced (1));
 
-    bandRow.removeFromLeft (8);
+    bandRow.removeFromLeft (10);
+    soloButton.setBounds (bandRow.removeFromLeft (56).reduced (1));
+    bandRow.removeFromLeft (4);
+    bandBypassButton.setBounds (bandRow.removeFromLeft (80).reduced (1));
+
+    bandRow.removeFromLeft (10);
     statusLabel.setBounds (bandRow);
 
     area.removeFromTop (8);

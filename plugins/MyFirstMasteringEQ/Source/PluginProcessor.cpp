@@ -114,6 +114,13 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         "Bypass",
         false));
 
+    // Added in v0.3.0, so they sort after everything above.
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+        layout.add (std::make_unique<juce::AudioParameterBool> (
+            juce::ParameterID { ParamIDs::bandBypass[(size_t) band], newBandVersionHint },
+            "Band" + suffixFor (band) + " Bypass",
+            false));
+
     return layout;
 }
 
@@ -133,6 +140,7 @@ MyFirstMasteringEQAudioProcessor::MyFirstMasteringEQAudioProcessor()
         bands[index].frequencyParameter = apvts.getRawParameterValue (ParamIDs::frequency[index]);
         bands[index].gainParameter      = apvts.getRawParameterValue (ParamIDs::gain[index]);
         bands[index].qParameter         = apvts.getRawParameterValue (ParamIDs::q[index]);
+        bands[index].bypassParameter    = apvts.getRawParameterValue (ParamIDs::bandBypass[index]);
     }
 }
 
@@ -152,8 +160,10 @@ void MyFirstMasteringEQAudioProcessor::prepareToPlay (double sampleRate, int sam
 
     constexpr double smoothingSeconds = 0.02;
 
-    for (auto& band : bands)
+    for (int index = 0; index < ParamIDs::numBands; ++index)
     {
+        auto& band = bands[(size_t) index];
+
         band.smoothedFrequency.reset (sampleRate, smoothingSeconds);
         band.smoothedGainDb.reset (sampleRate, smoothingSeconds);
         band.smoothedQ.reset (sampleRate, smoothingSeconds);
@@ -163,6 +173,9 @@ void MyFirstMasteringEQAudioProcessor::prepareToPlay (double sampleRate, int sam
         band.smoothedFrequency.setCurrentAndTargetValue (band.frequencyParameter->load());
         band.smoothedGainDb.setCurrentAndTargetValue (band.gainParameter->load());
         band.smoothedQ.setCurrentAndTargetValue (band.qParameter->load());
+
+        band.smoothedMix.reset (sampleRate, 0.01);
+        band.smoothedMix.setCurrentAndTargetValue (bandMixTarget (index));
 
         for (auto& filter : band.filters)
             filter.reset();
@@ -179,6 +192,24 @@ void MyFirstMasteringEQAudioProcessor::prepareToPlay (double sampleRate, int sam
                        false, true, false);
 
     updateFilterCoefficients();
+}
+
+float MyFirstMasteringEQAudioProcessor::bandMixTarget (int band) const noexcept
+{
+    const auto& state = bands[(size_t) band];
+
+    if (state.bypassParameter->load() > 0.5f)
+        return 0.0f;
+
+    const auto solo = soloBand.load (std::memory_order_relaxed);
+
+    return solo >= 0 && solo != band ? 0.0f : 1.0f;
+}
+
+void MyFirstMasteringEQAudioProcessor::setSoloBand (int band) noexcept
+{
+    soloBand.store (juce::isPositiveAndBelow (band, ParamIDs::numBands) ? band : -1,
+                    std::memory_order_relaxed);
 }
 
 void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
@@ -263,6 +294,9 @@ void MyFirstMasteringEQAudioProcessor::processBlock (juce::AudioBuffer<float>& b
         band.smoothedQ.setTargetValue (band.qParameter->load());
     }
 
+    for (int index = 0; index < ParamIDs::numBands; ++index)
+        bands[(size_t) index].smoothedMix.setTargetValue (bandMixTarget (index));
+
     smoothedWet.setTargetValue (bypassParameter->load() > 0.5f ? 0.0f : 1.0f);
 
     // 4) The host may pass a block longer than the one announced in
@@ -322,20 +356,35 @@ void MyFirstMasteringEQAudioProcessor::processWet (juce::AudioBuffer<float>& buf
                                                    int length,
                                                    int channelsToProcess)
 {
-    // The bands are chained, so each sample runs through them in turn. Channel
-    // state stays separate; the coefficients are shared between channels.
+    // The bands are chained, so each sample runs through them in turn - with one
+    // twist: a band that is bypassed (or muted by a solo) is faded out rather
+    // than switched off, so the biquads always see the signal and re-enabling a
+    // band starts from live state instead of a stale tail.
     const auto processRange = [this, &buffer, channelsToProcess] (int rangeStart, int rangeLength)
     {
-        for (int channel = 0; channel < channelsToProcess; ++channel)
+        std::array<float, ParamIDs::numBands> mix {};
+
+        for (int i = 0; i < rangeLength; ++i)
         {
-            auto* samples = buffer.getWritePointer (channel) + rangeStart;
+            // The fade is advanced once per sample, not once per channel, so a
+            // stereo block does not ramp at double speed.
+            for (int index = 0; index < ParamIDs::numBands; ++index)
+                mix[(size_t) index] = bands[(size_t) index].smoothedMix.getNextValue();
 
-            for (auto& band : bands)
+            for (int channel = 0; channel < channelsToProcess; ++channel)
             {
-                auto& filter = band.filters[(size_t) channel];
+                auto* samples = buffer.getWritePointer (channel, rangeStart);
+                auto value = samples[i];
 
-                for (int i = 0; i < rangeLength; ++i)
-                    samples[i] = filter.processSample (samples[i]);
+                for (int index = 0; index < ParamIDs::numBands; ++index)
+                {
+                    const auto filtered = bands[(size_t) index].filters[(size_t) channel]
+                                              .processSample (value);
+
+                    value += mix[(size_t) index] * (filtered - value);
+                }
+
+                samples[i] = value;
             }
         }
     };
@@ -451,6 +500,11 @@ void MyFirstMasteringEQAudioProcessor::applyFactoryPreset (int index)
     // frequency and Q are left alone so the layout the user built survives.
     for (int band = 1; band < ParamIDs::numBands; ++band)
         apply (ParamIDs::gain[(size_t) band], 0.0f);
+
+    // A bypassed band would swallow part of the preset, so every band comes back
+    // on. Solo is not touched: it is not saved and not part of the sound.
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+        apply (ParamIDs::bandBypass[(size_t) band], 0.0f);
 
     currentProgram.store (index, std::memory_order_relaxed);
 }
