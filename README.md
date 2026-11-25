@@ -80,9 +80,8 @@ macOS には `sha256sum` が無いので `shasum` を使う。
 # 検証に失敗した時点で止める
 set -e
 
-# 両方落とした場合
-shasum -a 256 -c SHA256SUMS
-# macOS のアーカイブだけ落とした場合
+# これから展開するアーカイブだけを検証する（両方落としていれば
+# `shasum -a 256 -c SHA256SUMS` でまとめて検証してもよい）
 grep macos SHA256SUMS | shasum -a 256 -c -
 
 tar -xzf MyFirstMasteringEQ-macos.tar.gz
