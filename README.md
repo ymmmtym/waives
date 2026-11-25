@@ -345,12 +345,28 @@ Carla が CLAP 非対応の場合は VST3 を使う。
 
 ### ホスト互換性の自動検証
 
-このリポジトリでは以下の 2 つで検証済み（Linux, JUCE 9.0.6）:
+CI（`.github/workflows/_build-plugin.yml`）が毎回実行し、失敗するとジョブが赤くなる:
 
-| ツール | 結果 |
-|--------|------|
-| `pluginval --strictness-level 5`（VST3） | SUCCESS（エディタ・オートメーション含む） |
-| `clap-validator`（CLAP） | 32 passed / 0 failed / 1 warning（仕様上想定内） |
+| 対象 | ツール | 実行環境 | 結果 |
+|------|--------|----------|------|
+| VST3 | `pluginval --strictness-level 5 --skip-gui-tests` | Linux / macOS | SUCCESS |
+| CLAP | `clap-validator` | Linux / macOS | 32 passed / 0 failed / 1 warning（仕様上想定内） |
+| AU | `auval -v aufx Mfmq Myau` | macOS | PASS |
+
+ツールは固定バージョン（pluginval 1.0.4 / clap-validator 0.4.1）を GitHub Releases から
+取得してキャッシュしている。手元で同じ検証をする場合:
+
+```bash
+# pluginval（VST3）
+pluginval --strictness-level 5 --skip-gui-tests --validate-in-process \
+  build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3
+
+# clap-validator（CLAP）
+clap-validator validate \
+  build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
+```
+
+どちらも失敗すると非 0 で終了するので、スクリプトから呼んでも判定できる。
 
 ### よくあるトラブル
 
