@@ -725,17 +725,20 @@ int main()
 
                 // Dragging a node writes through the APVTS, so the knobs follow.
                 const auto plot = FrequencyResponseCurve::Geometry::plotFor (curve->getLocalBounds().toFloat());
-                curve->applyNodeDrag (1,
-                                      { FrequencyResponseCurve::Geometry::xFor (2000.0, plot),
-                                        FrequencyResponseCurve::Geometry::yFor (6.0f, plot) },
-                                      { 0.0f, 0.0f });
+                setParameterValue (editorProcessor, ParamIDs::frequency[1], 1000.0f);
+                setParameterValue (editorProcessor, ParamIDs::gain[1], 0.0f);
+
+                // The axis spans 20 Hz to 20 kHz, so a third of the width is one decade.
+                curve->beginNodeDrag (1);
+                curve->dragNodeBy (1, { plot.getWidth() / 3.0f, -plot.getHeight() * 0.15f });
+                curve->endNodeDrag();
                 curve->refreshNow();
 
                 auto& editorState = editorProcessor.getValueTreeState();
 
                 check (std::abs (editorState.getRawParameterValue (ParamIDs::gain[1])->load() - 6.0f) < 0.2f,
                        "dragging a node moves that band's gain");
-                check (std::abs (editorState.getRawParameterValue (ParamIDs::frequency[1])->load() - 2000.0f) < 40.0f,
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::frequency[1])->load() - 10000.0f) < 120.0f,
                        "dragging a node moves that band's frequency");
                 check (std::abs (editorState.getRawParameterValue (ParamIDs::gain[2])->load() - (-7.0f)) < 0.01f,
                        "dragging one node leaves the other bands alone");
@@ -779,6 +782,27 @@ int main()
                 editor->setSize (900, 760);
                 check (curve->getBounds().getHeight() > 0,
                        "the layout survives the largest size");
+
+                // The node is drawn at the Nyquist-clamped frequency, which is below
+                // the parameter at low sample rates. A gain-only drag must not carry
+                // that drawn value back into the frequency parameter.
+                editorProcessor.setPlayConfigDetails (2, 2, 32000.0, 512);
+                editorProcessor.prepareToPlay (32000.0, 512);
+                setParameterValue (editorProcessor, ParamIDs::frequency[1], 16000.0f);
+                setParameterValue (editorProcessor, ParamIDs::gain[1], 0.0f);
+                curve->refreshNow();
+
+                curve->beginNodeDrag (1);
+                curve->dragNodeBy (1, { 0.0f, -20.0f });
+                curve->endNodeDrag();
+                curve->refreshNow();
+
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::frequency[1])->load() - 16000.0f) < 1.0f,
+                       "a gain-only drag keeps a frequency above the Nyquist clamp");
+                check (editorState.getRawParameterValue (ParamIDs::gain[1])->load() > 1.0f,
+                       "the same drag still moves the gain");
+
+                editorProcessor.releaseResources();
             }
         }
     }

@@ -112,6 +112,10 @@ FrequencyResponseCurve::FrequencyResponseCurve (juce::AudioProcessorValueTreeSta
 FrequencyResponseCurve::~FrequencyResponseCurve()
 {
     stopTimer();
+
+    // The editor can be closed mid-drag; an unclosed gesture leaves the host
+    // thinking the parameter is still being touched.
+    endNodeDrag();
 }
 
 void FrequencyResponseCurve::setSelectedBand (int band) noexcept
@@ -249,24 +253,67 @@ void FrequencyResponseCurve::scaleBandQ (int band, double factor)
         return;
 
     const auto current = parameter->convertFrom0to1 (parameter->getValue());
+    parameter->beginChangeGesture();
     parameter->setValueNotifyingHost (parameter->convertTo0to1 ((float) (current * factor)));
+    parameter->endChangeGesture();
 }
 
-void FrequencyResponseCurve::applyNodeDrag (int band,
-                                            juce::Point<float> position,
-                                            juce::Point<float> grabOffset)
+void FrequencyResponseCurve::beginNodeDrag (int band)
 {
     if (! juce::isPositiveAndBelow (band, ParamIDs::numBands))
         return;
 
+    endNodeDrag();
+
+    drag.band = band;
+    drag.frequency = apvts.getRawParameterValue (ParamIDs::frequency[(size_t) band])->load();
+    drag.gainDb = apvts.getRawParameterValue (ParamIDs::gain[(size_t) band])->load();
+
+    for (const auto* parameterID : { ParamIDs::frequency[(size_t) band], ParamIDs::gain[(size_t) band] })
+        if (auto* parameter = apvts.getParameter (parameterID))
+            parameter->beginChangeGesture();
+}
+
+void FrequencyResponseCurve::dragNodeBy (int band, juce::Point<float> delta)
+{
+    if (band != drag.band)
+        return;
+
     const auto plot = Geometry::plotFor (getLocalBounds().toFloat());
-    const auto node = position - grabOffset;
+
+    // The pointer moves the node, so the deltas are taken from where the drag
+    // started rather than from the absolute position. That matters for frequency:
+    // the node is drawn at the Nyquist-clamped value, which is below the parameter
+    // at low sample rates, so a gain-only drag must not write the drawn value back.
+    const auto ratio = plot.getWidth() > 0.0f
+                           ? std::pow (maximumHz / minimumHz, (double) delta.x / (double) plot.getWidth())
+                           : 1.0;
+    const auto hz = drag.frequency * ratio;
+
+    const auto dbPerPixel = 2.0f * maximumDb / juce::jmax (1.0f, plot.getHeight());
+    const auto gainDb = drag.gainDb - delta.y * dbPerPixel;
+
+    const auto& frequencyRange = apvts.getParameter (ParamIDs::frequency[(size_t) band])->getNormalisableRange();
+    const auto& gainRange = apvts.getParameter (ParamIDs::gain[(size_t) band])->getNormalisableRange();
 
     setBand (band,
-             Geometry::hzFor (node.x, plot),
-             Geometry::dbFor (node.y, plot));
+             juce::jlimit ((double) frequencyRange.start, (double) frequencyRange.end, hz),
+             juce::jlimit (gainRange.start, gainRange.end, gainDb));
 
     refreshNow();
+}
+
+void FrequencyResponseCurve::endNodeDrag()
+{
+    if (drag.band < 0)
+        return;
+
+    for (const auto* parameterID : { ParamIDs::frequency[(size_t) drag.band],
+                                     ParamIDs::gain[(size_t) drag.band] })
+        if (auto* parameter = apvts.getParameter (parameterID))
+            parameter->endChangeGesture();
+
+    drag.band = -1;
 }
 
 //==============================================================================
@@ -277,36 +324,20 @@ void FrequencyResponseCurve::mouseDown (const juce::MouseEvent& event)
     if (band < 0)
         return;
 
-    draggingBand = band;
-    dragGrabOffset = event.position - nodePosition (band, Geometry::plotFor (getLocalBounds().toFloat()));
+    beginNodeDrag (band);
 
     if (onBandSelected != nullptr)
         onBandSelected (band);
-
-    for (const auto* parameterID : { ParamIDs::frequency[(size_t) band], ParamIDs::gain[(size_t) band] })
-        if (auto* parameter = apvts.getParameter (parameterID))
-            parameter->beginChangeGesture();
 }
 
 void FrequencyResponseCurve::mouseDrag (const juce::MouseEvent& event)
 {
-    if (draggingBand < 0)
-        return;
-
-    applyNodeDrag (draggingBand, event.position, dragGrabOffset);
+    dragNodeBy (drag.band, event.position - event.mouseDownPosition);
 }
 
 void FrequencyResponseCurve::mouseUp (const juce::MouseEvent&)
 {
-    if (draggingBand < 0)
-        return;
-
-    for (const auto* parameterID : { ParamIDs::frequency[(size_t) draggingBand],
-                                     ParamIDs::gain[(size_t) draggingBand] })
-        if (auto* parameter = apvts.getParameter (parameterID))
-            parameter->endChangeGesture();
-
-    draggingBand = -1;
+    endNodeDrag();
 }
 
 void FrequencyResponseCurve::mouseMove (const juce::MouseEvent& event)

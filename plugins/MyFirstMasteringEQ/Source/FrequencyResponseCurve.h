@@ -45,9 +45,13 @@ public:
         static float dbFor (float y, juce::Rectangle<float> plot) noexcept;
     };
 
-    /** Moves `band`'s node to `position` minus `grabOffset`. Public so the drag
-        maths can be checked without synthesising mouse events. */
-    void applyNodeDrag (int band, juce::Point<float> position, juce::Point<float> grabOffset);
+    /** Node dragging, in steps so the maths can be checked without synthesising
+        mouse events: beginNodeDrag takes the host's change gestures and remembers
+        the starting values, dragNodeBy applies a pixel delta, endNodeDrag closes
+        the gestures. */
+    void beginNodeDrag (int band);
+    void dragNodeBy (int band, juce::Point<float> delta);
+    void endNodeDrag();
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& event) override;
@@ -76,6 +80,13 @@ private:
 
     int nodeAt (juce::Point<float> position) const;
     juce::Point<float> nodePosition (int band, juce::Rectangle<float> plot) const;
+    struct Drag
+    {
+        int band = -1;
+        double frequency = 0.0;
+        float gainDb = 0.0f;
+    };
+
     void setBand (int band, double hz, float gainDb);
     void scaleBandQ (int band, double factor);
 
@@ -85,8 +96,7 @@ private:
     Snapshot lastSnapshot;
     int selectedBand = 0;
 
-    int draggingBand = -1;
-    juce::Point<float> dragGrabOffset;
+    Drag drag;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FrequencyResponseCurve)
 };
