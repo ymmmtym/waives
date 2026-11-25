@@ -52,15 +52,18 @@ main にマージするたびに自動で作られ、タグは `v<バージョ�
 | `MyFirstMasteringEQ-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
 | `SHA256SUMS` | 上記のチェックサム |
 
-展開すると `MyFirstMasteringEQ_artefacts/Release/` と `THIRD-PARTY-NOTICES.md` が出てくる。
+展開すると `MyFirstMasteringEQ_artefacts/Release/`、`LICENSE`、
+`THIRD-PARTY-NOTICES.md` が出てくる。
 
 ### Linux
 
 ```bash
-tar -xzf MyFirstMasteringEQ-linux.tar.gz
+# 検証に失敗した時点で止める
+set -e
 
 # 片方のアーカイブだけ落とした場合は --ignore-missing を付ける
 sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf MyFirstMasteringEQ-linux.tar.gz
 
 mkdir -p ~/.vst3 ~/.clap ~/.local/bin
 cp -R MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/.vst3/
@@ -74,12 +77,15 @@ install -Dm755 MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringE
 macOS には `sha256sum` が無いので `shasum` を使う。
 
 ```bash
-tar -xzf MyFirstMasteringEQ-macos.tar.gz
+# 検証に失敗した時点で止める
+set -e
 
 # 両方落とした場合
 shasum -a 256 -c SHA256SUMS
 # macOS のアーカイブだけ落とした場合
 grep macos SHA256SUMS | shasum -a 256 -c -
+
+tar -xzf MyFirstMasteringEQ-macos.tar.gz
 
 mkdir -p ~/Library/Audio/Plug-Ins/{Components,VST3,CLAP}
 
