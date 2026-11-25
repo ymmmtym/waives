@@ -61,8 +61,10 @@ main にマージするたびに自動で作られ、タグは `v<バージョ�
 # 検証に失敗した時点で止める
 set -e
 
-# 片方のアーカイブだけ落とした場合は --ignore-missing を付ける
-sha256sum -c --ignore-missing SHA256SUMS
+# これから展開するアーカイブだけを検証する（両方落としていれば
+# `sha256sum -c SHA256SUMS` でまとめて検証してもよい）
+grep -F '  MyFirstMasteringEQ-linux.tar.gz' SHA256SUMS | sha256sum -c -
+
 tar -xzf MyFirstMasteringEQ-linux.tar.gz
 
 mkdir -p ~/.vst3 ~/.clap ~/.local/bin
@@ -82,7 +84,7 @@ set -e
 
 # これから展開するアーカイブだけを検証する（両方落としていれば
 # `shasum -a 256 -c SHA256SUMS` でまとめて検証してもよい）
-grep macos SHA256SUMS | shasum -a 256 -c -
+grep -F '  MyFirstMasteringEQ-macos.tar.gz' SHA256SUMS | shasum -a 256 -c -
 
 tar -xzf MyFirstMasteringEQ-macos.tar.gz
 
