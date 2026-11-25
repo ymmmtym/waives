@@ -192,6 +192,19 @@ jobs:
           done
           exit 1
 
+      # auval checks the AU contract; pluginval additionally loads the component
+      # in a host and walks its parameters, which is closer to what Logic does.
+      - name: Validate AU (pluginval)
+        if: runner.os == 'macOS'
+        env:
+          PLUGIN: ${{ inputs.plugin }}
+        run: |
+          set -euo pipefail
+          component="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN}.component"
+          # --skip-gui-tests: the runner has no display for the editor.
+          tools/bin/pluginval --strictness-level 5 --skip-gui-tests \
+            --validate-in-process "$component"
+
       # upload-artifact resets file modes to 0644, which breaks the standalone
       # binary and the installer's -x check. A tarball keeps the permissions.
       - name: Package plugin bundles

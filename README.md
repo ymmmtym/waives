@@ -385,6 +385,20 @@ cp -R build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/AU/M
 auval -v aufx Mfmq Myau
 ```
 
+### 実機での確認を 1 コマンドで
+
+macOS 上なら、リリースのダウンロードから配置・署名・`auval`・`pluginval` までを
+`scripts/verify-macos.sh` がまとめて行う:
+
+```bash
+./scripts/verify-macos.sh                 # 最新リリースを使う
+./scripts/verify-macos.sh --tarball FILE  # 手元の tar.gz を使う
+./scripts/verify-macos.sh --au-only       # AU だけ入れる
+./scripts/verify-macos.sh --dry-run       # 何をするかだけ表示する
+```
+
+Logic Pro に読み込んでからの確認項目は [docs/logic-pro-checklist.md](docs/logic-pro-checklist.md) にある。
+
 ### macOS 実機が無い場合
 
 `.github/workflows/build.yml` が GitHub Actions の macOS ランナーで AU / VST3 / CLAP /
@@ -406,6 +420,10 @@ tar -xzf MyFirstMasteringEQ-macos.tar.gz -C build/plugins/MyFirstMasteringEQ
 ```bash
 xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
 ```
+
+AU の検証は CI でも回している（`auval` と pluginval の AU ロード）。
+リリースの macOS バンドルは universal（arm64 + x86_64）で、
+`Info.plist` の `AudioComponents` は `aufx Mfmq Myau`。
 
 ## 8. Carla / DAW での動作確認
 
