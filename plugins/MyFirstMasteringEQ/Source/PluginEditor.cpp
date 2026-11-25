@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "BandPalette.h"
 #include "PluginProcessor.h"
 
 namespace
@@ -41,7 +42,6 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
       curve (p.getValueTreeState(), [&p] { return p.getCurrentSampleRate(); })
 {
     setResizable (true, true);
-    setResizeLimits (400, 420, 900, 760);
 
     titleLabel.setText ("MyFirstMasteringEQ", juce::dontSendNotification);
     titleLabel.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
@@ -49,8 +49,7 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
-    statusLabel.setText ("Band 1 of 4", juce::dontSendNotification);
-    statusLabel.setFont (juce::Font (juce::FontOptions (14.0f)));
+    statusLabel.setFont (juce::Font (juce::FontOptions (13.0f)));
     statusLabel.setColour (juce::Label::textColourId, textSecondary);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (statusLabel);
@@ -70,21 +69,38 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 
     // Units come from the parameter's own text conversion (see PluginProcessor),
     // so the sliders must not add a suffix of their own.
-    styleRotary (frequencySlider);
-    styleRotary (gainSlider);
-    styleRotary (qSlider);
-
     for (auto* slider : { &frequencySlider, &gainSlider, &qSlider })
+    {
+        styleRotary (*slider);
         addAndMakeVisible (*slider);
+    }
 
+    frequencySlider.setComponentID ("frequencySlider");
+    gainSlider.setComponentID ("gainSlider");
+    qSlider.setComponentID ("qSlider");
+
+    // One button per band, each in its own colour, behaving as a radio group.
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+    {
+        auto button = std::make_unique<juce::TextButton> (juce::String (band + 1));
+
+        button->setComponentID ("band" + juce::String (band + 1));
+        button->setClickingTogglesState (true);
+        button->setRadioGroupId (0x62616e64);   // "band"
+        button->setTooltip ("Edit band " + juce::String (band + 1));
+        button->setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        button->setColour (juce::TextButton::buttonOnColourId, waives::ui::bandColour (band));
+        button->setColour (juce::TextButton::textColourOffId, textSecondary);
+        button->setColour (juce::TextButton::textColourOnId, backgroundTop);
+        button->onClick = [this, band] { selectBand (band); };
+
+        addAndMakeVisible (*button);
+        bandButtons[(size_t) band] = std::move (button);
+    }
+
+    curve.setComponentID ("frequencyResponseCurve");
+    curve.onBandSelected = [this] (int band) { selectBand (band); };
     addAndMakeVisible (curve);
-
-    configureKnob (frequencySlider, ParamIDs::frequency[0], "Frequency",
-                   "Boost or cut around this frequency. Logarithmic from 20 Hz to 20 kHz.");
-    configureKnob (gainSlider, ParamIDs::gain[0], "Gain",
-                   "How much to boost or cut, in dB. Mastering moves usually stay within +/- 3 dB.");
-    configureKnob (qSlider, ParamIDs::q[0], "Q",
-                   "Sharpness of the bell. Higher Q affects a narrower band.");
 
     for (int program = 0; program < processorRef.getNumPrograms(); ++program)
         presetBox.addItem (processorRef.getProgramName (program), program + 1);
@@ -110,14 +126,16 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
     bypassButton.setTitle ("Bypass");
     addAndMakeVisible (bypassButton);
 
-    // The attachments copy the parameter's range (including its skew) into the
-    // slider, so Frequency and Q are logarithmic without extra work here.
-    frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency[0], frequencySlider);
-    gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain[0],      gainSlider);
-    qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q[0],         qSlider);
-    bypassAttachment    = std::make_unique<ButtonAttachment> (apvts, ParamIDs::bypass,    bypassButton);
+    bypassAttachment = std::make_unique<ButtonAttachment> (apvts, ParamIDs::bypass, bypassButton);
 
+    selectBand (0);
     setSize (480, 500);
+
+    // Last: the call applies the constraint straight away, which runs resized()
+    // while the components above do not exist yet.
+    // 480x500 is the size the layout is designed for; below it the graph and the
+    // knobs would start to overlap, so it is also the minimum.
+    setResizeLimits (480, 500, 900, 760);
 
     updateInfoLabel();
     startTimerHz (4);
@@ -126,6 +144,57 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 MyFirstMasteringEQAudioProcessorEditor::~MyFirstMasteringEQAudioProcessorEditor()
 {
     stopTimer();
+}
+
+//==============================================================================
+void MyFirstMasteringEQAudioProcessorEditor::selectBand (int band)
+{
+    if (! juce::isPositiveAndBelow (band, ParamIDs::numBands))
+        return;
+
+    if (band != selectedBand)
+    {
+        selectedBand = band;
+        attachKnobsToBand (band);
+    }
+
+    curve.setSelectedBand (band);
+    updateBandButtons();
+
+    statusLabel.setText ("Band " + juce::String (band + 1) + " of " + juce::String (ParamIDs::numBands),
+                         juce::dontSendNotification);
+}
+
+void MyFirstMasteringEQAudioProcessorEditor::attachKnobsToBand (int band)
+{
+    const auto index = (size_t) band;
+    const auto name = "Band " + juce::String (band + 1);
+
+    // Drop the old listeners first: a surviving attachment would keep writing the
+    // previous band's value into the slider after the switch.
+    frequencyAttachment.reset();
+    gainAttachment.reset();
+    qAttachment.reset();
+
+    // The attachments copy the parameter's range (including its skew) into the
+    // slider, so Frequency and Q are logarithmic without extra work here.
+    frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency[index], frequencySlider);
+    gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain[index],      gainSlider);
+    qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q[index],         qSlider);
+
+    configureKnob (frequencySlider, ParamIDs::frequency[index], name + " frequency",
+                   "Boost or cut around this frequency. Logarithmic from 20 Hz to 20 kHz.");
+    configureKnob (gainSlider, ParamIDs::gain[index], name + " gain",
+                   "How much to boost or cut, in dB. Mastering moves usually stay within +/- 3 dB.");
+    configureKnob (qSlider, ParamIDs::q[index], name + " Q",
+                   "Sharpness of the bell. Higher Q affects a narrower band; the mouse wheel over "
+                   "the graph node does the same thing.");
+}
+
+void MyFirstMasteringEQAudioProcessorEditor::updateBandButtons()
+{
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+        bandButtons[(size_t) band]->setToggleState (band == selectedBand, juce::dontSendNotification);
 }
 
 void MyFirstMasteringEQAudioProcessorEditor::configureKnob (juce::Slider& slider,
@@ -207,8 +276,15 @@ void MyFirstMasteringEQAudioProcessorEditor::resized()
     statusRow.removeFromRight (8);
     presetBox.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
 
-    area.removeFromTop (4);
-    statusLabel.setBounds (area.removeFromTop (20));
+    area.removeFromTop (6);
+
+    auto bandRow = area.removeFromTop (24);
+
+    for (auto& button : bandButtons)
+        button->setBounds (bandRow.removeFromLeft (34).reduced (1));
+
+    bandRow.removeFromLeft (8);
+    statusLabel.setBounds (bandRow);
 
     area.removeFromTop (8);
 

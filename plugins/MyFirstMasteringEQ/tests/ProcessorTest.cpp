@@ -1,7 +1,9 @@
 // Headless test driver: instantiates the real AudioProcessor and runs the same
 // processBlock() the plugin uses, without a host or an audio device.
 
+#include "FrequencyResponseCurve.h"
 #include "PeakResponse.h"
+#include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "TestUtilities.h"
 
@@ -668,22 +670,140 @@ int main()
     }
 
     //==========================================================================
-    // The GUI tests in pluginval are skipped in CI, so at least build the editor
-    // and run its layout once; an assert or a crash in either fails here.
+    // The GUI tests in pluginval are skipped in CI, so build the editor here and
+    // exercise the parts that carry logic: band selection, node dragging and the
+    // layout at the smallest allowed size.
     {
-        std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+        MyFirstMasteringEQAudioProcessor editorProcessor;
+        editorProcessor.setPlayConfigDetails (2, 2, 48000.0, 512);
+        editorProcessor.prepareToPlay (48000.0, 512);
+
+        std::unique_ptr<MyFirstMasteringEQAudioProcessorEditor> editor (
+            static_cast<MyFirstMasteringEQAudioProcessorEditor*> (editorProcessor.createEditor()));
+
         check (editor != nullptr, "createEditor() returns an editor");
 
         if (editor != nullptr)
         {
-            check (editor->getWidth() > 0 && editor->getHeight() > 0,
-                   "the editor starts with a size");
+            editor->setSize (480, 500);
 
-            editor->setSize (400, 420);
-            editor->setSize (900, 760);
+            auto* curve = dynamic_cast<FrequencyResponseCurve*> (editor->findChildWithID ("frequencyResponseCurve"));
+            auto* frequencySlider = dynamic_cast<juce::Slider*> (editor->findChildWithID ("frequencySlider"));
+            auto* gainSlider = dynamic_cast<juce::Slider*> (editor->findChildWithID ("gainSlider"));
+            auto* band3Button = dynamic_cast<juce::Button*> (editor->findChildWithID ("band3"));
 
-            check (editor->getWidth() == 900 && editor->getHeight() == 760,
-                   "the editor follows its resize limits");
+            check (curve != nullptr && frequencySlider != nullptr
+                       && gainSlider != nullptr && band3Button != nullptr,
+                   "the graph, the knobs and the band buttons are there");
+
+            auto* constrainer = editor->getConstrainer();
+            check (constrainer != nullptr
+                       && constrainer->getMinimumWidth() == 480
+                       && constrainer->getMinimumHeight() == 500,
+                   "480x500 is the smallest size the layout allows");
+
+            if (curve != nullptr && frequencySlider != nullptr
+                && gainSlider != nullptr && band3Button != nullptr)
+            {
+                // Selecting a band must point every knob at that band's values.
+                setParameterValue (editorProcessor, ParamIDs::gain[2], -7.0f);
+                setParameterValue (editorProcessor, ParamIDs::frequency[2], 4321.0f);
+
+                editor->selectBand (2);
+
+                check (band3Button->getToggleState(), "the band 3 button shows the selection");
+                check (std::abs (gainSlider->getValue() - (-7.0)) < 0.01,
+                       "band 3's gain reaches the gain knob");
+                check (std::abs (frequencySlider->getValue() - 4321.0) < 1.0,
+                       "band 3's frequency reaches the frequency knob");
+
+                editor->selectBand (0);
+
+                check (! band3Button->getToggleState(), "the band 3 button clears again");
+                check (std::abs (gainSlider->getValue()) < 0.01,
+                       "band 1's gain comes back when band 1 is selected");
+
+                // Dragging a node writes through the APVTS, so the knobs follow.
+                const auto plot = FrequencyResponseCurve::Geometry::plotFor (curve->getLocalBounds().toFloat());
+                setParameterValue (editorProcessor, ParamIDs::frequency[1], 1000.0f);
+                setParameterValue (editorProcessor, ParamIDs::gain[1], 0.0f);
+
+                // The axis spans 20 Hz to 20 kHz, so a third of the width is one decade.
+                curve->beginNodeDrag (1);
+                curve->dragNodeBy (1, { plot.getWidth() / 3.0f, -plot.getHeight() * 0.15f });
+                curve->endNodeDrag();
+                curve->refreshNow();
+
+                auto& editorState = editorProcessor.getValueTreeState();
+
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::gain[1])->load() - 6.0f) < 0.2f,
+                       "dragging a node moves that band's gain");
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::frequency[1])->load() - 10000.0f) < 120.0f,
+                       "dragging a node moves that band's frequency");
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::gain[2])->load() - (-7.0f)) < 0.01f,
+                       "dragging one node leaves the other bands alone");
+
+                // The thick curve is the sum of the individual bands.
+                setParameterValue (editorProcessor, ParamIDs::frequency[0], 500.0f);
+                setParameterValue (editorProcessor, ParamIDs::gain[0], 9.0f);
+                setParameterValue (editorProcessor, ParamIDs::q[0], 1.0f);
+                curve->refreshNow();
+
+                std::array<waives::peak::BandSettings, ParamIDs::numBands> chain {};
+
+                for (int band = 0; band < ParamIDs::numBands; ++band)
+                {
+                    const auto index = (size_t) band;
+
+                    chain[index] = { editorState.getRawParameterValue (ParamIDs::frequency[index])->load(),
+                                     editorState.getRawParameterValue (ParamIDs::gain[index])->load(),
+                                     editorState.getRawParameterValue (ParamIDs::q[index])->load() };
+                }
+
+                for (const double probeHz : { 500.0, 1000.0, 2000.0 })
+                {
+                    const auto drawn = curve->combinedResponseDbAt (probeHz);
+                    const auto expected = waives::peak::combinedResponseDb (48000.0, chain, probeHz);
+
+                    const auto label = juce::String ("the drawn curve is the sum of the bands at ")
+                                     + juce::String (probeHz, 0) + " Hz";
+
+                    check (std::abs (drawn - expected) < 0.05f, label.toRawUTF8());
+                }
+
+                // The three sections must not collide at the minimum size.
+                check (! curve->getBounds().intersects (frequencySlider->getBounds()),
+                       "the graph does not overlap the frequency knob");
+                check (! curve->getBounds().intersects (gainSlider->getBounds()),
+                       "the graph does not overlap the gain knob");
+                check (! curve->getBounds().intersects (band3Button->getBounds()),
+                       "the graph does not overlap the band buttons");
+
+                editor->setSize (900, 760);
+                check (curve->getBounds().getHeight() > 0,
+                       "the layout survives the largest size");
+
+                // The node is drawn at the Nyquist-clamped frequency, which is below
+                // the parameter at low sample rates. A gain-only drag must not carry
+                // that drawn value back into the frequency parameter.
+                editorProcessor.setPlayConfigDetails (2, 2, 32000.0, 512);
+                editorProcessor.prepareToPlay (32000.0, 512);
+                setParameterValue (editorProcessor, ParamIDs::frequency[1], 16000.0f);
+                setParameterValue (editorProcessor, ParamIDs::gain[1], 0.0f);
+                curve->refreshNow();
+
+                curve->beginNodeDrag (1);
+                curve->dragNodeBy (1, { 0.0f, -20.0f });
+                curve->endNodeDrag();
+                curve->refreshNow();
+
+                check (std::abs (editorState.getRawParameterValue (ParamIDs::frequency[1])->load() - 16000.0f) < 1.0f,
+                       "a gain-only drag keeps a frequency above the Nyquist clamp");
+                check (editorState.getRawParameterValue (ParamIDs::gain[1])->load() > 1.0f,
+                       "the same drag still moves the gain");
+
+                editorProcessor.releaseResources();
+            }
         }
     }
 
