@@ -12,6 +12,18 @@ AU を **実際の Logic Pro に読み込んで**確認するためのチェッ�
 - macOS 12 以降、Logic Pro 10.7 以降
 - リポジトリを clone 済み（スクリプトを実行するため）
 
+先に、同じプラグインが既に入っていないかを確認してバックアップしておく
+（スクリプトは同じ名前のバンドルを上書きするため）:
+
+```bash
+for p in ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component \
+         ~/Library/Audio/Plug-Ins/VST3/MyFirstMasteringEQ.vst3 \
+         ~/Library/Audio/Plug-Ins/CLAP/MyFirstMasteringEQ.clap \
+         ~/Applications/MyFirstMasteringEQ.app /Applications/MyFirstMasteringEQ.app; do
+    [ -e "$p" ] && cp -R "$p" "$p.bak"
+done
+```
+
 ```bash
 git clone https://github.com/ymmmtym/waives.git
 cd waives
@@ -150,9 +162,20 @@ ls -d /Applications/MyFirstMasteringEQ.app ~/Applications/MyFirstMasteringEQ.app
 rm -rf ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
 rm -rf ~/Library/Audio/Plug-Ins/VST3/MyFirstMasteringEQ.vst3
 rm -rf ~/Library/Audio/Plug-Ins/CLAP/MyFirstMasteringEQ.clap
-# 上の ls で出てきたパスだけを消す（検証前から入っていたものは残す）
+# 上の ls で出てきたパスだけを消す
 rm -rf ~/Applications/MyFirstMasteringEQ.app
 killall -9 AudioComponentRegistrar || true
+```
+
+検証前から入っていたものは、先頭で作った `.bak` から戻す:
+
+```bash
+for p in ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component \
+         ~/Library/Audio/Plug-Ins/VST3/MyFirstMasteringEQ.vst3 \
+         ~/Library/Audio/Plug-Ins/CLAP/MyFirstMasteringEQ.clap \
+         ~/Applications/MyFirstMasteringEQ.app /Applications/MyFirstMasteringEQ.app; do
+    [ -e "$p.bak" ] && rm -rf "$p" && mv "$p.bak" "$p"
+done
 ```
 
 ## 報告テンプレート（#19 に貼る）
