@@ -23,6 +23,10 @@ private:
     void updateInfoLabel();
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+
+    void configureKnob (juce::Slider& slider, const char* parameterID,
+                        const juce::String& title, const juce::String& description);
 
     MyFirstMasteringEQAudioProcessor& processorRef;
     juce::AudioProcessorValueTreeState& apvts;
@@ -39,12 +43,18 @@ private:
     juce::Slider gainSlider;
     juce::Slider qSlider;
 
+    juce::ToggleButton bypassButton;
+
     FrequencyResponseCurve curve;
 
     // Declared after the sliders so they are destroyed first.
     std::unique_ptr<SliderAttachment> frequencyAttachment;
     std::unique_ptr<SliderAttachment> gainAttachment;
     std::unique_ptr<SliderAttachment> qAttachment;
+    std::unique_ptr<ButtonAttachment> bypassAttachment;
+
+    // Must be destroyed before the components it watches, so it is last.
+    juce::TooltipWindow tooltipWindow { this, 700 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MyFirstMasteringEQAudioProcessorEditor)
 };

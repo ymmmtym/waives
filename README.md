@@ -22,7 +22,8 @@ plugins/<PluginName>/
 `CMakeLists.txt` と `cmake/WaivesPlugin.cmake` にまとめてある。
 
 **現在の状態: Step 5 完了** — 1 バンドのピーキング EQ として動作。
-3 パラメータ（Frequency / Gain / Q）、ノブ UI、周波数特性グラフを実装済み。
+4 パラメータ（Frequency / Gain / Q / Bypass）、ノブ UI、周波数特性グラフ、
+10 ms クロスフェード付きのバイパスを実装済み。
 残りは macOS での AU ビルドと Logic での確認（Step 6）。
 
 ## パラメータ
@@ -32,6 +33,11 @@ plugins/<PluginName>/
 | Frequency | `freq` | 20 Hz – 20 kHz | 1 kHz | 対数（1 kHz が中央） | `1.00 kHz` / `440.0 Hz` |
 | Gain | `gain` | -18 – +18 dB | 0 dB | 線形（0.01 dB 刻み） | `6.00 dB` |
 | Q | `q` | 0.1 – 10 | 1.0 | 対数（1.0 が中央） | `4.00` |
+| Bypass | `bypass` | off / on | off | 2 値 | — |
+
+`bypass` は既存 3 パラメータの**後ろ**に追加している。ID と version hint（1）は
+変えていないので、以前のセッションのオートメーションはそのまま読める（値は off）。
+切り替えは 10 ms のクロスフェードで、クリックノイズは出ない。
 
 | 項目 | 内容 |
 |------|------|

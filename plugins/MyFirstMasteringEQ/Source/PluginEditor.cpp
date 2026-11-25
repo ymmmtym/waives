@@ -49,7 +49,7 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (titleLabel);
 
-    statusLabel.setText ("Step 5 - peaking EQ", juce::dontSendNotification);
+    statusLabel.setText ("Single-band peaking EQ", juce::dontSendNotification);
     statusLabel.setFont (juce::Font (juce::FontOptions (14.0f)));
     statusLabel.setColour (juce::Label::textColourId, textSecondary);
     statusLabel.setJustificationType (juce::Justification::centredLeft);
@@ -79,11 +79,27 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 
     addAndMakeVisible (curve);
 
+    configureKnob (frequencySlider, ParamIDs::frequency, "Frequency",
+                   "Boost or cut around this frequency. Logarithmic from 20 Hz to 20 kHz.");
+    configureKnob (gainSlider, ParamIDs::gain, "Gain",
+                   "How much to boost or cut, in dB. Mastering moves usually stay within +/- 3 dB.");
+    configureKnob (qSlider, ParamIDs::q, "Q",
+                   "Sharpness of the bell. Higher Q affects a narrower band.");
+
+    bypassButton.setButtonText ("BYPASS");
+    bypassButton.setColour (juce::ToggleButton::textColourId, textSecondary);
+    bypassButton.setColour (juce::ToggleButton::tickColourId, accent);
+    bypassButton.setColour (juce::ToggleButton::tickDisabledColourId, textSecondary);
+    bypassButton.setTooltip ("Pass the audio through untouched, for an A/B comparison");
+    bypassButton.setTitle ("Bypass");
+    addAndMakeVisible (bypassButton);
+
     // The attachments copy the parameter's range (including its skew) into the
     // slider, so Frequency and Q are logarithmic without extra work here.
     frequencyAttachment = std::make_unique<SliderAttachment> (apvts, ParamIDs::frequency, frequencySlider);
     gainAttachment      = std::make_unique<SliderAttachment> (apvts, ParamIDs::gain,      gainSlider);
     qAttachment         = std::make_unique<SliderAttachment> (apvts, ParamIDs::q,         qSlider);
+    bypassAttachment    = std::make_unique<ButtonAttachment> (apvts, ParamIDs::bypass,    bypassButton);
 
     setSize (480, 500);
 
@@ -94,6 +110,28 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
 MyFirstMasteringEQAudioProcessorEditor::~MyFirstMasteringEQAudioProcessorEditor()
 {
     stopTimer();
+}
+
+void MyFirstMasteringEQAudioProcessorEditor::configureKnob (juce::Slider& slider,
+                                                            const char* parameterID,
+                                                            const juce::String& title,
+                                                            const juce::String& description)
+{
+    auto* parameter = apvts.getParameter (parameterID);
+
+    jassert (parameter != nullptr);
+
+    if (parameter == nullptr)
+        return;
+
+    // Double click returns the knob to the parameter's own default, so the
+    // shortcut and the session state can never disagree.
+    slider.setDoubleClickReturnValue (true, parameter->convertFrom0to1 (parameter->getDefaultValue()));
+
+    slider.setTooltip (description);
+    slider.setTitle (title);
+    slider.setDescription (description);
+    slider.setWantsKeyboardFocus (true);
 }
 
 void MyFirstMasteringEQAudioProcessorEditor::timerCallback()
@@ -140,8 +178,13 @@ void MyFirstMasteringEQAudioProcessorEditor::resized()
 
     titleLabel.setBounds (area.removeFromTop (30));
     area.removeFromTop (8);
-    statusLabel.setBounds (area.removeFromTop (20));
-    area.removeFromTop (10);
+
+    auto statusRow = area.removeFromTop (24);
+    bypassButton.setBounds (statusRow.removeFromRight (92));
+    statusRow.removeFromRight (8);
+    statusLabel.setBounds (statusRow);
+
+    area.removeFromTop (8);
 
     infoLabel.setBounds (area.removeFromBottom (20));
     area.removeFromBottom (8);

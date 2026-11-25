@@ -1,6 +1,7 @@
 // Headless test driver: instantiates the real AudioProcessor and runs the same
 // processBlock() the plugin uses, without a host or an audio device.
 
+#include "PeakResponse.h"
 #include "PluginProcessor.h"
 #include "TestUtilities.h"
 
@@ -32,6 +33,7 @@ namespace
         setParameterValue (processor, ParamIDs::frequency, centreHz);
         setParameterValue (processor, ParamIDs::gain, gainDb);
         setParameterValue (processor, ParamIDs::q, q);
+        setParameterValue (processor, ParamIDs::bypass, 0.0f);
 
         constexpr int blockSize = 512;
         processor.setPlayConfigDetails (1, 1, sampleRate, blockSize);
@@ -158,7 +160,8 @@ int main()
     // Parameters
     auto& apvts = processor.getValueTreeState();
 
-    check (processor.getParameters().size() == 3, "exactly three parameters are published");
+    check (processor.getParameters().size() == 4,
+           "freq, gain, q and bypass are the published parameters");
 
     auto* freqParam = apvts.getParameter (ParamIDs::frequency);
     auto* gainParam = apvts.getParameter (ParamIDs::gain);
@@ -217,6 +220,7 @@ int main()
     freqParam->setValueNotifyingHost (freqParam->convertTo0to1 (5000.0f));
     gainParam->setValueNotifyingHost (gainParam->convertTo0to1 (6.0f));
     qParam->setValueNotifyingHost (qParam->convertTo0to1 (4.0f));
+    setParameterValue (processor, ParamIDs::bypass, 1.0f);
 
     juce::MemoryBlock state;
     processor.getStateInformation (state);
@@ -235,15 +239,19 @@ int main()
            "state restores the gain");
     check (std::abs (restoredState.getRawParameterValue (ParamIDs::q)->load() - 4.0f) < 1.0e-3f,
            "state restores the Q");
+    check (restoredState.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f,
+           "state restores the bypass switch");
 
     const char garbage[] = "this is not a plugin state";
     restored.setStateInformation (garbage, (int) sizeof (garbage));
     check (std::abs (restoredState.getRawParameterValue (ParamIDs::gain)->load() - 6.0f) < 1.0e-3f,
            "garbage state is ignored");
 
-    // The restored instance carries +6 dB, so flatten it before checking that it
-    // processes audio correctly (prepareToPlay snaps the smoothing to the value).
+    // The restored instance carries +6 dB and bypass on, so flatten it before
+    // checking that it processes audio correctly (prepareToPlay snaps the
+    // smoothing to the value).
     setParameterValue (restored, ParamIDs::gain, 0.0f);
+    setParameterValue (restored, ParamIDs::bypass, 0.0f);
     restored.prepareToPlay (sampleRate, blockSize);
 
     juce::AudioBuffer<float> restoredBuffer (reference);
@@ -343,25 +351,127 @@ int main()
     // The frequency-response graph uses this analytic |H(e^jw)| formula; it must
     // agree with what the audio path actually measures, or the graph lies.
     {
-        const auto raw = juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter (
-            48000.0, 1000.0f, 1.0f, juce::Decibels::decibelsToGain (12.0f));
+        struct Probe
+        {
+            float centreHz;
+            float gainDb;
+            float q;
+            double probeHz;
+            const char* what;
+        };
 
-        const auto a0 = raw[3];
-        const auto b0 = raw[0] / a0, b1 = raw[1] / a0, b2 = raw[2] / a0;
-        const auto a1 = raw[4] / a0, a2 = raw[5] / a0;
+        const Probe probes[] = {
+            { 1000.0f,  12.0f, 1.0f, 1000.0, "on the peak" },
+            { 1000.0f,  12.0f, 1.0f,  100.0, "far below the peak" },
+            { 1000.0f,  12.0f, 1.0f, 2000.0, "on the skirt" },
+            { 1000.0f,  -9.0f, 4.0f, 1000.0, "on a narrow cut" },
+        };
 
-        const auto omega = 2.0 * juce::MathConstants<double>::pi * 1000.0 / 48000.0;
-        const std::complex<double> z1 (std::cos (-omega), std::sin (-omega));
-        const auto z2 = z1 * z1;
+        for (const double rate : { 44100.0, 48000.0, 96000.0 })
+        {
+            for (const auto& probe : probes)
+            {
+                const waives::peak::BandSettings band { probe.centreHz, probe.gainDb, probe.q };
 
-        const auto analyticDb = (float) juce::Decibels::gainToDecibels (
-            std::abs (((double) b0 + (double) b1 * z1 + (double) b2 * z2)
-                      / (1.0 + (double) a1 * z1 + (double) a2 * z2)));
+                const auto analytic = waives::peak::responseDb (rate, band, probe.probeHz);
+                const auto measured = measureGainDb (processor, rate, probe.centreHz,
+                                                     probe.gainDb, probe.q, probe.probeHz);
 
-        const auto measuredDb = measureGainDb (processor, 48000.0, 1000.0f, 12.0f, 1.0f, 1000.0);
+                const auto label = juce::String ("graph matches the audio path, ")
+                                 + juce::String (rate / 1000.0, 1) + " kHz, "
+                                 + probe.what;
 
-        check (std::abs (analyticDb - measuredDb) < 0.2,
-               "analytic curve matches the measured response");
+                check (std::abs (analytic - measured) < 0.5, label.toRawUTF8());
+            }
+        }
+    }
+
+    //==========================================================================
+    // Bypass: the dry signal has to survive bit-exactly, and switching must fade
+    // rather than jump.
+    {
+        auto* bypassParam = apvts.getParameter (ParamIDs::bypass);
+        check (bypassParam != nullptr, "bypass parameter exists");
+
+        if (bypassParam != nullptr)
+            check (bypassParam->getDefaultValue() < 0.5f, "bypass defaults to off");
+
+        setParameterValue (processor, ParamIDs::frequency, 1000.0f);
+        setParameterValue (processor, ParamIDs::gain, 18.0f);
+        setParameterValue (processor, ParamIDs::q, 1.0f);
+        setParameterValue (processor, ParamIDs::bypass, 1.0f);
+
+        processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+
+        juce::AudioBuffer<float> bypassed (2, blockSize);
+        fillWithSine (bypassed);
+        const juce::AudioBuffer<float> bypassReference (bypassed);
+
+        processor.processBlock (bypassed, midi);
+        check (buffersMatch (bypassed, bypassReference, 0.0f),
+               "bypass is a bit-exact pass-through");
+
+        // Switch bypass on mid-stream, with the filter carrying a +18 dB boost,
+        // and watch a single continuous block so sample-to-sample steps are real.
+        setParameterValue (processor, ParamIDs::bypass, 0.0f);
+        processor.setPlayConfigDetails (1, 1, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+
+        juce::AudioBuffer<float> warmUp (1, blockSize);
+
+        for (int block = 0; block < 20; ++block)
+        {
+            fillWithSine (warmUp, 1000.0, sampleRate);
+            processor.processBlock (warmUp, midi);
+        }
+
+        setParameterValue (processor, ParamIDs::bypass, 1.0f);
+
+        constexpr int fadeLength = 2048;   // ~43 ms, several times the 10 ms fade
+        juce::AudioBuffer<float> fade (1, fadeLength);
+        fillWithSine (fade, 1000.0, sampleRate);
+        const juce::AudioBuffer<float> fadeInput (fade);
+
+        processor.processBlock (fade, midi);
+
+        const auto rmsOver = [] (const juce::AudioBuffer<float>& audio, int start, int length)
+        {
+            double sum = 0.0;
+
+            for (int i = 0; i < length; ++i)
+            {
+                const auto value = (double) audio.getSample (0, start + i);
+                sum += value * value;
+            }
+
+            return std::sqrt (sum / length);
+        };
+
+        const auto earlyDb = juce::Decibels::gainToDecibels (
+            rmsOver (fade, 0, 96) / rmsOver (fadeInput, 0, 96));
+        const auto settledDb = juce::Decibels::gainToDecibels (
+            rmsOver (fade, fadeLength - 480, 480) / rmsOver (fadeInput, fadeLength - 480, 480));
+
+        check (earlyDb > 6.0, "the fade starts from the processed signal");
+        check (std::abs (settledDb) < 0.1, "the fade reaches the dry signal");
+
+        double maxStep = 0.0;
+
+        for (int i = 1; i < fadeLength; ++i)
+            maxStep = juce::jmax (maxStep,
+                                  (double) std::abs (fade.getSample (0, i)
+                                                     - fade.getSample (0, i - 1)));
+
+        // The boosted sine itself steps by 2 * A * sin(w / 2) per sample; a fade
+        // adds nothing beyond that if it is smooth.
+        const auto boostedAmplitude = (double) juce::Decibels::decibelsToGain (18.0f);
+        const auto naturalStep = 2.0 * boostedAmplitude
+                               * std::sin (juce::MathConstants<double>::pi * 1000.0 / sampleRate);
+
+        check (maxStep < naturalStep * 1.15, "switching bypass does not step the output");
+
+        setParameterValue (processor, ParamIDs::bypass, 0.0f);
     }
 
     processor.releaseResources();
