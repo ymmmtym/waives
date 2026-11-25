@@ -26,3 +26,12 @@ waives_add_plugin_tests(MyFirstMasteringEQTests
     LINK_LIBRARIES
         juce::juce_audio_utils
         juce::juce_dsp)
+
+# Manual benchmark: ./build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQBench_artefacts/Release/MyFirstMasteringEQBench
+waives_add_plugin_benchmark(MyFirstMasteringEQBench
+    BENCHMARK_SOURCE benchmarks/Benchmark.cpp
+    SOURCES          ${MYEQ_SOURCES}
+    INCLUDE_DIRS     Source
+    LINK_LIBRARIES
+        juce::juce_audio_utils
+        juce::juce_dsp)

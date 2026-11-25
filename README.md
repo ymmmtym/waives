@@ -276,12 +276,39 @@ ctest --test-dir build --output-on-failure
 
 ホストもオーディオデバイスも使わずに、実際の `processBlock()` を呼んで検証する。
 
-ホスト互換性の検証（任意）:
+ホスト互換性の検証（CI でも毎回実行している。詳細は「8. ホスト互換性の自動検証」）:
 
 ```bash
-pluginval --strictness-level 5 --validate build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3
-clap-validator validate build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
+pluginval --strictness-level 5 --skip-gui-tests --validate-in-process \
+  build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3
+clap-validator validate \
+  build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap
 ```
+
+### 処理コストの計測
+
+`ctest` には入れていない手動実行のベンチマークがある（数値はマシン依存なので、
+合否ではなく記録として扱う）:
+
+```bash
+./build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQBench_artefacts/Release/MyFirstMasteringEQBench
+```
+
+1 kHz の正弦波を 10 秒ぶん、ステレオで流したときの実測値
+（Linux, x86_64, Release ビルド, 1 バンド）:
+
+| サンプルレート | ブロック | 処理時間 | リアルタイム比 | 1 コアあたり CPU |
+|----------------|----------|----------|----------------|------------------|
+| 44.1 kHz | 64 | 15.5 ms | 643x | 0.155 % |
+| 44.1 kHz | 512 | 16.0 ms | 626x | 0.160 % |
+| 48 kHz | 64 | 17.2 ms | 581x | 0.172 % |
+| 48 kHz | 512 | 17.3 ms | 577x | 0.173 % |
+| 96 kHz | 512 | 35.2 ms | 284x | 0.352 % |
+| 192 kHz | 512 | 67.6 ms | 148x | 0.676 % |
+
+レイテンシは 0 サンプル（IIR のため）。1 バンドでこの水準なので、4 バンドにしても
+1 コアの 1 % 未満に収まる見込み。**数値は CPU・ビルド設定で変わる**ので、
+比較するときは同じマシンで測り直すこと。
 
 ## 6. CMake オプション
 
@@ -289,6 +316,7 @@ clap-validator validate build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ_arte
 |-----------|--------|------|
 | `WAIVES_BUILD_CLAP` | `ON` | CLAP 形式をビルドする |
 | `WAIVES_BUILD_TESTS` | `ON` | ヘッドレステストをビルドする |
+| `WAIVES_BUILD_BENCHMARKS` | `ON` | 手動実行のベンチマークをビルドする（`ctest` には登録しない） |
 
 出力形式は `cmake/WaivesPlugin.cmake` の `waives_add_plugin()` が決める
 （Linux: `VST3 Standalone`、macOS では `if(APPLE)` で `AU` が追加される）。
@@ -489,6 +517,43 @@ cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 ./scripts/install-linux.sh
 ```
+
+## 11. リリースの運用
+
+main に push するたびに、`release` ワークフローがビルド・テスト・検証を通したうえで
+GitHub Release を作る。
+
+- タグは `v<VERSION>-<短い SHA>`（例: `v0.1.0-d1a7913`）。`VERSION` はリポジトリ直下の
+  `VERSION` ファイルが唯一の出所で、`CMakeLists.txt` と `release.yml` の両方が読む
+- 同じコミットで再実行した場合は、新しいリリースを作らず既存のタグに成果物を上書きする
+  （`--clobber`）
+- 成果物は Linux / macOS の tarball と `SHA256SUMS`。検証手順は「すぐ使う」を参照
+
+### 同じバージョンで複数のリリースが並ぶ件
+
+タグにコミットの SHA が入るので、`VERSION` を上げないまま main が進むと
+`v0.1.0-5815984` と `v0.1.0-d1a7913` のように**同じバージョンのリリースが複数**できる。
+これは意図した挙動で、次の理由から**古いものも残す**方針にしている。
+
+- 「どのコミットのビルドか」がタグだけで分かるので、不具合の切り分けに使える
+- 過去のビルドを再現・再配布できる（AGPL の「対応するソース」の観点でも素直）
+- 最新のリリースが GitHub の `latest` になるため、利用者は最新を選べばよい
+
+一覧を整理したくなった場合は、古いものを手動で消す（**不可逆**なので注意）:
+
+```bash
+gh release list
+gh release delete v0.1.0-5815984 --cleanup-tag   # タグも消す
+```
+
+「同じ VERSION のリリースは 1 つだけにする」運用に変える場合は、
+`release.yml` の publish ジョブに「同じ VERSION の古いリリースを削除する」ステップを足す。
+
+### バージョンを上げる
+
+1. `VERSION` を書き換える（例: `0.1.0` → `0.2.0`）
+2. 同じ PR で README の該当箇所を更新する
+3. マージすると `v0.2.0-<sha>` が作られる
 
 ## ライセンス
 

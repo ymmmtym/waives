@@ -38,6 +38,7 @@ endif()
 
 option(WAIVES_BUILD_CLAP  "Build the CLAP format" ON)
 option(WAIVES_BUILD_TESTS "Build the headless processor tests" ON)
+option(WAIVES_BUILD_BENCHMARKS "Build the manual benchmark executables" ON)
 
 include(cmake/Dependencies.cmake)
 include(cmake/WaivesPlugin.cmake)
