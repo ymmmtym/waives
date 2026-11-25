@@ -33,6 +33,10 @@ jobs:
   build:
     name: ${{ inputs.plugin }} / ${{ inputs.platform }}
     runs-on: ${{ inputs.os }}
+    # A universal macOS build takes 12-13 minutes warm. One run was cut off at
+    # exactly 15 minutes and marked cancelled, which skipped the release step,
+    # so state the ceiling explicitly instead of relying on the default.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
