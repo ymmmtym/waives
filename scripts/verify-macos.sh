@@ -74,7 +74,12 @@ if [ -z "$TARBALL" ]; then
 
     if [ "$DRY_RUN" -eq 0 ] && [ -f "$WORK/SHA256SUMS" ]; then
         log "Checking the download against SHA256SUMS"
-        step "$(cd "$WORK" && grep " ${ASSET}\$" SHA256SUMS | shasum -a 256 -c -)"
+        # shasum's own exit status has to decide, so it cannot sit inside a
+        # command substitution whose status comes from printf.
+        if ! (cd "$WORK" && grep " ${ASSET}\$" SHA256SUMS | shasum -a 256 -c -); then
+            echo "checksum mismatch for ${ASSET}; refusing to install it" >&2
+            exit 1
+        fi
     fi
 fi
 
@@ -138,8 +143,9 @@ fi
 
 log "Restarting the audio component registry"
 # auval and Logic read a cached component list; without this the new bundle is
-# invisible until the next login.
-run killall -9 AudioComponentRegistrar
+# invisible until the next login. killall exits 1 when the daemon is not
+# running, which is normal on a machine that has not opened a host yet.
+run sh -c 'killall -9 AudioComponentRegistrar || true'
 run sleep 3
 
 log "auval: does the component register?"

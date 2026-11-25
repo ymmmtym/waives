@@ -23,8 +23,18 @@ cd waives
 `auval passed` と出れば、Logic のプラグインスキャンを通る状態になっている。
 `auval failed` の場合は、その出力を issue に貼れば原因を追える。
 
-> 手元でビルドしたものを使う場合は `--tarball` で渡す:
-> `./scripts/verify-macos.sh --tarball build/plugins/MyFirstMasteringEQ/MyFirstMasteringEQ-macos.tar.gz`
+> 手元でビルドしたものを使う場合は、まず tar にまとめてから `--tarball` で渡す:
+>
+> ```bash
+> cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+>       -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+> cmake --build build --parallel
+> tar -czf MyFirstMasteringEQ-macos.tar.gz \
+>     -C build/plugins/MyFirstMasteringEQ MyFirstMasteringEQ_artefacts
+> ./scripts/verify-macos.sh --tarball MyFirstMasteringEQ-macos.tar.gz
+> ```
+>
+> リリースの tar.gz と同じ中身（`MyFirstMasteringEQ_artefacts/Release/` 以下）になる。
 
 ## 1. 環境を記録する
 
@@ -70,8 +80,9 @@ MyFirstMasteringEQ を選び **Reset & Rescan Selection**。
 
 ## 5. ソロとバンド単位バイパス
 
-- [ ] **SOLO** を押すと、選択中バンド以外の帯域が消える（10 ms で滑らかに）
-- [ ] SOLO を解除すると元の音に戻る
+- [ ] 2 つ以上のバンドにブースト／カットを入れてから **SOLO** を押すと、
+      選択中バンドの効果だけが残る（他バンドのブースト／カットが外れる。音は消えない）
+- [ ] SOLO を解除すると元の音に戻る（切り替えは 10 ms で滑らかに）
 - [ ] バンドを切り替えるとソロもそのバンドに移る
 - [ ] **BAND OFF** を押すと、そのバンドの効果だけが消える（他のバンドは効いたまま）
 - [ ] どの切り替えでもクリックノイズが出ない
@@ -83,11 +94,15 @@ MyFirstMasteringEQ を選び **Reset & Rescan Selection**。
 
 ## 7. オートメーション
 
-1. Stereo Out の MyFirstMasteringEQ を開く
+1. 音源を再生している**オーディオトラック**の Audio FX にも MyFirstMasteringEQ を挿す
 2. バンド 2 を選び、**GAIN** を右クリック → **オートメーションを表示**
-3. トラックのオートメーションを有効にして、ゲインを描く
+3. そのトラックのオートメーションを有効にして、ゲインを描く
 
-- [ ] パラメータ一覧に `Frequency` / `Gain` / `Q` / `Band Bypass` がバンドごとに出る（41 個）
+Stereo Out で試す場合は、先に **Track → Show Master Track**（`⌘⇧M`）で
+マスタートラックを表示しておくと、同じ手順でオートメーションを描ける。
+
+- [ ] パラメータ一覧に `Frequency` / `Gain` / `Q` / `Band Bypass` がバンドごとに出る
+      （4 × 4 バンド + 全体 Bypass = 17 個）
 - [ ] 描いたオートメーションどおりに音が動く
 - [ ] 再生中にノブが動く（ホスト側の値が UI に反映される）
 
@@ -102,7 +117,8 @@ MyFirstMasteringEQ を選び **Reset & Rescan Selection**。
 
 ## 9. サンプルレートとバッファ
 
-Logic の **環境設定 → Audio → Devices** でサンプルレートを変えながら確認する。
+プロジェクトのサンプルレートは **File → Project Settings → Audio → Sample Rate** で変える
+（**環境設定 → Audio → Devices** のほうは I/O バッファとオーディオデバイスの設定）。
 
 | サンプルレート | 音が破綻しない | グラフのノード位置が正しい |
 |----------------|----------------|----------------------------|
@@ -121,12 +137,22 @@ Logic の **環境設定 → Audio → Devices** でサンプルレートを変�
 
 ## 11. 後片付け
 
+スクリプトは Standalone を `/Applications` か `~/Applications` の**書き込めるほう**に
+だけ置く。消す前に、どちらに入ったかを確認する:
+
+```bash
+ls -d /Applications/MyFirstMasteringEQ.app ~/Applications/MyFirstMasteringEQ.app 2>/dev/null
+```
+
+そのうえで、実際に存在するものだけを消す:
+
 ```bash
 rm -rf ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component
 rm -rf ~/Library/Audio/Plug-Ins/VST3/MyFirstMasteringEQ.vst3
 rm -rf ~/Library/Audio/Plug-Ins/CLAP/MyFirstMasteringEQ.clap
-rm -rf ~/Applications/MyFirstMasteringEQ.app /Applications/MyFirstMasteringEQ.app
-killall -9 AudioComponentRegistrar
+# 上の ls で出てきたパスだけを消す（検証前から入っていたものは残す）
+rm -rf ~/Applications/MyFirstMasteringEQ.app
+killall -9 AudioComponentRegistrar || true
 ```
 
 ## 報告テンプレート（#19 に貼る）
