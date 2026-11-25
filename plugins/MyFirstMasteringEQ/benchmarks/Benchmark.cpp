@@ -82,9 +82,9 @@ int main()
         parameter->setValueNotifyingHost (parameter->convertTo0to1 (realValue));
     };
 
-    setParameter (ParamIDs::frequency, 1000.0f);
-    setParameter (ParamIDs::gain, 6.0f);
-    setParameter (ParamIDs::q, 1.0f);
+    setParameter (ParamIDs::frequency[0], 1000.0f);
+    setParameter (ParamIDs::gain[0], 6.0f);
+    setParameter (ParamIDs::q[0], 1.0f);
 
     std::printf ("%9s %7s %12s %12s %12s %13s\n",
                  "rate", "block", "audio (s)", "wall (ms)", "realtime", "cpu (1 core)");

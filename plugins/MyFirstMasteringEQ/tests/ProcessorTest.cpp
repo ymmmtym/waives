@@ -25,16 +25,28 @@ namespace
     // Runs a sine of `probeHz` through the processor and returns the measured
     // gain in dB, skipping the first 250 ms so smoothing and the filter
     // transient do not pollute the result.
+    // Measures the chain with whatever the parameters are set to right now.
+        double measureCurrentSettingsDb (MyFirstMasteringEQAudioProcessor& processor,
+                                     double sampleRate,
+                                     double probeHz);
+
     double measureGainDb (MyFirstMasteringEQAudioProcessor& processor,
                           double sampleRate,
                           float centreHz, float gainDb, float q,
                           double probeHz)
     {
-        setParameterValue (processor, ParamIDs::frequency, centreHz);
-        setParameterValue (processor, ParamIDs::gain, gainDb);
-        setParameterValue (processor, ParamIDs::q, q);
+        setParameterValue (processor, ParamIDs::frequency[0], centreHz);
+        setParameterValue (processor, ParamIDs::gain[0], gainDb);
+        setParameterValue (processor, ParamIDs::q[0], q);
         setParameterValue (processor, ParamIDs::bypass, 0.0f);
 
+        return measureCurrentSettingsDb (processor, sampleRate, probeHz);
+    }
+
+    double measureCurrentSettingsDb (MyFirstMasteringEQAudioProcessor& processor,
+                                     double sampleRate,
+                                     double probeHz)
+    {
         constexpr int blockSize = 512;
         processor.setPlayConfigDetails (1, 1, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
@@ -77,6 +89,19 @@ namespace
         const auto rmsOut = std::sqrt (outputEnergy / measuredSamples);
 
         return juce::Decibels::gainToDecibels (rmsOut / rmsIn);
+    }
+
+    // Band 1 flat, bands 2..4 flat: the state a fresh instance starts from.
+    void flattenBands (MyFirstMasteringEQAudioProcessor& processor)
+    {
+        for (int band = 0; band < ParamIDs::numBands; ++band)
+        {
+            setParameterValue (processor, ParamIDs::frequency[(size_t) band], 1000.0f);
+            setParameterValue (processor, ParamIDs::gain[(size_t) band], 0.0f);
+            setParameterValue (processor, ParamIDs::q[(size_t) band], 1.0f);
+        }
+
+        setParameterValue (processor, ParamIDs::bypass, 0.0f);
     }
 
     // Mimics a host: set the configuration, prepare, then process one block.
@@ -163,12 +188,12 @@ int main()
     // Parameters
     auto& apvts = processor.getValueTreeState();
 
-    check (processor.getParameters().size() == 4,
-           "freq, gain, q and bypass are the published parameters");
+    check (processor.getParameters().size() == 3 * ParamIDs::numBands + 1,
+           "each band publishes freq/gain/q, plus the bypass switch");
 
-    auto* freqParam = apvts.getParameter (ParamIDs::frequency);
-    auto* gainParam = apvts.getParameter (ParamIDs::gain);
-    auto* qParam    = apvts.getParameter (ParamIDs::q);
+    auto* freqParam = apvts.getParameter (ParamIDs::frequency[0]);
+    auto* gainParam = apvts.getParameter (ParamIDs::gain[0]);
+    auto* qParam    = apvts.getParameter (ParamIDs::q[0]);
 
     check (freqParam != nullptr && gainParam != nullptr && qParam != nullptr,
            "freq / gain / q parameters exist");
@@ -236,24 +261,24 @@ int main()
 
     auto& restoredState = restored.getValueTreeState();
 
-    check (std::abs (restoredState.getRawParameterValue (ParamIDs::frequency)->load() - 5000.0f) < 1.0f,
+    check (std::abs (restoredState.getRawParameterValue (ParamIDs::frequency[0])->load() - 5000.0f) < 1.0f,
            "state restores the frequency");
-    check (std::abs (restoredState.getRawParameterValue (ParamIDs::gain)->load() - 6.0f) < 1.0e-3f,
+    check (std::abs (restoredState.getRawParameterValue (ParamIDs::gain[0])->load() - 6.0f) < 1.0e-3f,
            "state restores the gain");
-    check (std::abs (restoredState.getRawParameterValue (ParamIDs::q)->load() - 4.0f) < 1.0e-3f,
+    check (std::abs (restoredState.getRawParameterValue (ParamIDs::q[0])->load() - 4.0f) < 1.0e-3f,
            "state restores the Q");
     check (restoredState.getRawParameterValue (ParamIDs::bypass)->load() > 0.5f,
            "state restores the bypass switch");
 
     const char garbage[] = "this is not a plugin state";
     restored.setStateInformation (garbage, (int) sizeof (garbage));
-    check (std::abs (restoredState.getRawParameterValue (ParamIDs::gain)->load() - 6.0f) < 1.0e-3f,
+    check (std::abs (restoredState.getRawParameterValue (ParamIDs::gain[0])->load() - 6.0f) < 1.0e-3f,
            "garbage state is ignored");
 
     // The restored instance carries +6 dB and bypass on, so flatten it before
     // checking that it processes audio correctly (prepareToPlay snaps the
     // smoothing to the value).
-    setParameterValue (restored, ParamIDs::gain, 0.0f);
+    setParameterValue (restored, ParamIDs::gain[0], 0.0f);
     setParameterValue (restored, ParamIDs::bypass, 0.0f);
     restored.prepareToPlay (sampleRate, blockSize);
 
@@ -294,14 +319,14 @@ int main()
         constexpr double rate = 48000.0;
         constexpr int longBlock = 4096;
 
-        setParameterValue (processor, ParamIDs::frequency, 1000.0f);
-        setParameterValue (processor, ParamIDs::q, 1.0f);
-        setParameterValue (processor, ParamIDs::gain, 0.0f);
+        setParameterValue (processor, ParamIDs::frequency[0], 1000.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 0.0f);
 
         processor.setPlayConfigDetails (1, 1, rate, longBlock);
         processor.prepareToPlay (rate, longBlock);
 
-        setParameterValue (processor, ParamIDs::gain, 18.0f);   // knob jump
+        setParameterValue (processor, ParamIDs::gain[0], 18.0f);   // knob jump
 
         juce::AudioBuffer<float> jumpBuffer (1, longBlock);
         juce::AudioBuffer<float> jumpInput (1, longBlock);
@@ -337,7 +362,7 @@ int main()
     // A biquad at unity gain is only mathematically transparent; on FMA hardware
     // the rounding is visible. The processor must bypass it bit-exactly.
     {
-        setParameterValue (processor, ParamIDs::gain, 0.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 0.0f);
         processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
 
@@ -399,9 +424,9 @@ int main()
         if (bypassParam != nullptr)
             check (bypassParam->getDefaultValue() < 0.5f, "bypass defaults to off");
 
-        setParameterValue (processor, ParamIDs::frequency, 1000.0f);
-        setParameterValue (processor, ParamIDs::gain, 18.0f);
-        setParameterValue (processor, ParamIDs::q, 1.0f);
+        setParameterValue (processor, ParamIDs::frequency[0], 1000.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 18.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
         setParameterValue (processor, ParamIDs::bypass, 1.0f);
 
         processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
@@ -478,6 +503,126 @@ int main()
     }
 
     //==========================================================================
+    // Four bands in series: each one is independent, and the combined response is
+    // the sum of the individual decibel curves.
+    {
+        flattenBands (processor);
+
+        // Only band 2 is active: band 1 must not colour the result.
+        setParameterValue (processor, ParamIDs::frequency[1], 2000.0f);
+        setParameterValue (processor, ParamIDs::gain[1], 12.0f);
+        setParameterValue (processor, ParamIDs::q[1], 1.0f);
+
+        const auto atBand2 = measureCurrentSettingsDb (processor, sampleRate, 2000.0);
+        check (std::abs (atBand2 - 12.0) < 0.5, "band 2 boosts its own centre frequency");
+
+        const auto awayFromBand2 = measureCurrentSettingsDb (processor, sampleRate, 100.0);
+        check (std::abs (awayFromBand2) < 0.5, "band 2 leaves the rest of the spectrum alone");
+
+        // Band 1 keeps working while band 2 is active.
+        setParameterValue (processor, ParamIDs::frequency[0], 300.0f);
+        setParameterValue (processor, ParamIDs::gain[0], -9.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
+
+        const auto atBand1 = measureCurrentSettingsDb (processor, sampleRate, 300.0);
+        check (std::abs (atBand1 - (-9.0)) < 0.5, "band 1 still works with band 2 active");
+
+        const auto atBand2Again = measureCurrentSettingsDb (processor, sampleRate, 2000.0);
+        check (std::abs (atBand2Again - atBand2) < 0.5,
+               "moving band 1 does not change band 2's response");
+
+        // Two bands overlapping: the measured result must be the sum of the
+        // analytic curves, which is what the graph draws.
+        flattenBands (processor);
+        setParameterValue (processor, ParamIDs::frequency[0], 500.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 9.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
+        setParameterValue (processor, ParamIDs::frequency[1], 4000.0f);
+        setParameterValue (processor, ParamIDs::gain[1], 6.0f);
+        setParameterValue (processor, ParamIDs::q[1], 1.0f);
+
+        const std::array<waives::peak::BandSettings, ParamIDs::numBands> chain {{
+            { 500.0f, 9.0f, 1.0f },
+            { 4000.0f, 6.0f, 1.0f },
+            { 1000.0f, 0.0f, 1.0f },
+            { 1000.0f, 0.0f, 1.0f },
+        }};
+
+        for (const double probeHz : { 500.0, 1000.0, 4000.0 })
+        {
+            const auto measured = measureCurrentSettingsDb (processor, sampleRate, probeHz);
+            const auto analytic = waives::peak::combinedResponseDb (sampleRate, chain, probeHz);
+
+            const auto label = juce::String ("two bands add up at ")
+                             + juce::String (probeHz, 0) + " Hz";
+
+            check (std::abs (measured - analytic) < 0.5, label.toRawUTF8());
+        }
+
+        // The same boost in a different band must sound the same: the chain is
+        // ordered but the response is not.
+        flattenBands (processor);
+        setParameterValue (processor, ParamIDs::frequency[3], 1000.0f);
+        setParameterValue (processor, ParamIDs::gain[3], 12.0f);
+        setParameterValue (processor, ParamIDs::q[3], 1.0f);
+
+        const auto inBand4 = measureCurrentSettingsDb (processor, sampleRate, 1000.0);
+        check (std::abs (inBand4 - 12.0) < 0.5, "band 4 boosts like any other band");
+
+        flattenBands (processor);
+    }
+
+    //==========================================================================
+    // A session saved by the one-band build only carries band 1's parameters;
+    // the rest must stay at 0 dB so the sound does not change on reload.
+    {
+        // Build a real state, then drop everything the one-band build did not
+        // know about: that is exactly what an old session looks like.
+        MyFirstMasteringEQAudioProcessor legacy;
+        setParameterValue (legacy, ParamIDs::frequency[0], 5000.0f);
+        setParameterValue (legacy, ParamIDs::gain[0], 6.0f);
+        setParameterValue (legacy, ParamIDs::q[0], 4.0f);
+
+        auto legacyState = legacy.getValueTreeState().copyState();
+
+        for (int band = 1; band < ParamIDs::numBands; ++band)
+        {
+            const auto index = (size_t) band;
+
+            for (const auto* parameterID : { ParamIDs::frequency[index],
+                                             ParamIDs::gain[index],
+                                             ParamIDs::q[index] })
+            {
+                auto child = legacyState.getChildWithName (parameterID);
+
+                if (child.isValid())
+                    legacyState.removeChild (child, nullptr);
+            }
+        }
+
+        juce::MemoryBlock legacyBlock;
+        juce::AudioProcessor::copyXmlToBinary (*legacyState.createXml(), legacyBlock);
+
+        MyFirstMasteringEQAudioProcessor migrated;
+        migrated.setStateInformation (legacyBlock.getData(), (int) legacyBlock.getSize());
+
+        auto& migratedState = migrated.getValueTreeState();
+
+        check (std::abs (migratedState.getRawParameterValue (ParamIDs::frequency[0])->load() - 5000.0f) < 1.0f,
+               "a one-band session restores band 1's frequency");
+        check (std::abs (migratedState.getRawParameterValue (ParamIDs::gain[0])->load() - 6.0f) < 1.0e-3f,
+               "a one-band session restores band 1's gain");
+
+        bool otherBandsFlat = true;
+
+        for (int band = 1; band < ParamIDs::numBands; ++band)
+            otherBandsFlat = otherBandsFlat
+                          && std::abs (migratedState.getRawParameterValue (ParamIDs::gain[(size_t) band])->load()) < 1.0e-3f;
+
+        check (otherBandsFlat, "the new bands stay flat when an old session is opened");
+    }
+
+    //==========================================================================
     // Factory presets: the host's program menu has to offer them, and choosing
     // one must move the parameters.
     {
@@ -493,13 +638,13 @@ int main()
                "an out-of-range preset name is empty");
 
         processor.setCurrentProgram (0);
-        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain)->load()) < 1.0e-3f,
+        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain[0])->load()) < 1.0e-3f,
                "the first preset is a 0 dB pass-through");
 
         processor.setCurrentProgram (1);
         check (processor.getCurrentProgram() == 1, "setCurrentProgram() selects the program");
-        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain)->load()) > 0.1f
-                   || std::abs (apvts.getRawParameterValue (ParamIDs::frequency)->load() - 1000.0f) > 1.0f,
+        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain[0])->load()) > 0.1f
+                   || std::abs (apvts.getRawParameterValue (ParamIDs::frequency[0])->load() - 1000.0f) > 1.0f,
                "selecting another preset changes the parameters");
 
         processor.setCurrentProgram (processor.getNumPrograms());

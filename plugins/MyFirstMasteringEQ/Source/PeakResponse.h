@@ -10,6 +10,9 @@
 // drift away from what is heard.
 namespace waives::peak
 {
+    /** Number of peaking bands the plugin runs in series. */
+    constexpr int maxBands = 4;
+
     struct BandSettings
     {
         float frequency = 1000.0f;
@@ -71,5 +74,18 @@ namespace waives::peak
     inline float responseDb (double sampleRate, BandSettings band, double probeHz) noexcept
     {
         return responseDb (normalise (makePeakCoefficients (sampleRate, band)), sampleRate, probeHz);
+    }
+
+    /** Series biquads multiply their magnitudes, so their decibels add up. */
+    inline float combinedResponseDb (double sampleRate,
+                                     const std::array<BandSettings, maxBands>& bands,
+                                     double probeHz) noexcept
+    {
+        float sum = 0.0f;
+
+        for (const auto& band : bands)
+            sum += responseDb (sampleRate, band, probeHz);
+
+        return sum;
     }
 }

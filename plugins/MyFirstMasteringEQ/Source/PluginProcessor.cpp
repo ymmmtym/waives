@@ -64,32 +64,44 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
+    // Band 1 keeps the plain names it had as a one-band plugin.
+    const auto suffixFor = [] (int band)
+    {
+        return band == 0 ? juce::String() : " " + juce::String (band + 1);
+    };
+
     // The version hint (1) must stay stable per parameter ID: VST3/AU hosts use
     // it to match automation data across sessions.
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { ParamIDs::frequency, 1 },
-        "Frequency",
-        makeLogRange (20.0f, 20000.0f, 1000.0f),
-        1000.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("Hz")
-            .withStringFromValueFunction (formatFrequency)
-            .withValueFromStringFunction (parseFrequency)));
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+    {
+        const auto index = (size_t) band;
+        const auto suffix = suffixFor (band);
 
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { ParamIDs::gain, 1 },
-        "Gain",
-        juce::NormalisableRange<float> { -18.0f, 18.0f, 0.01f },
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("dB")
-            .withStringFromValueFunction (formatDecibels)));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::frequency[index], 1 },
+            "Frequency" + suffix,
+            makeLogRange (20.0f, 20000.0f, 1000.0f),
+            1000.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("Hz")
+                .withStringFromValueFunction (formatFrequency)
+                .withValueFromStringFunction (parseFrequency)));
 
-    layout.add (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { ParamIDs::q, 1 },
-        "Q",
-        makeLogRange (0.1f, 10.0f, 1.0f),
-        1.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("Q")
-            .withStringFromValueFunction (formatQ)));
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::gain[index], 1 },
+            "Gain" + suffix,
+            juce::NormalisableRange<float> { -18.0f, 18.0f, 0.01f },
+            0.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("dB")
+                .withStringFromValueFunction (formatDecibels)));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { ParamIDs::q[index], 1 },
+            "Q" + suffix,
+            makeLogRange (0.1f, 10.0f, 1.0f),
+            1.0f,
+            juce::AudioParameterFloatAttributes().withLabel ("Q")
+                .withStringFromValueFunction (formatQ)));
+    }
 
     layout.add (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { ParamIDs::bypass, 1 },
@@ -105,10 +117,17 @@ MyFirstMasteringEQAudioProcessor::MyFirstMasteringEQAudioProcessor()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
 {
-    frequencyParameter = apvts.getRawParameterValue (ParamIDs::frequency);
-    gainParameter      = apvts.getRawParameterValue (ParamIDs::gain);
-    qParameter         = apvts.getRawParameterValue (ParamIDs::q);
-    bypassParameter    = apvts.getRawParameterValue (ParamIDs::bypass);
+    bypassParameter = apvts.getRawParameterValue (ParamIDs::bypass);
+
+    // Read-only views of the APVTS atomics: safe to load from the audio thread.
+    for (int band = 0; band < ParamIDs::numBands; ++band)
+    {
+        const auto index = (size_t) band;
+
+        bands[index].frequencyParameter = apvts.getRawParameterValue (ParamIDs::frequency[index]);
+        bands[index].gainParameter      = apvts.getRawParameterValue (ParamIDs::gain[index]);
+        bands[index].qParameter         = apvts.getRawParameterValue (ParamIDs::q[index]);
+    }
 }
 
 MyFirstMasteringEQAudioProcessor::~MyFirstMasteringEQAudioProcessor() = default;
@@ -127,18 +146,21 @@ void MyFirstMasteringEQAudioProcessor::prepareToPlay (double sampleRate, int sam
 
     constexpr double smoothingSeconds = 0.02;
 
-    smoothedFrequency.reset (sampleRate, smoothingSeconds);
-    smoothedGainDb.reset (sampleRate, smoothingSeconds);
-    smoothedQ.reset (sampleRate, smoothingSeconds);
+    for (auto& band : bands)
+    {
+        band.smoothedFrequency.reset (sampleRate, smoothingSeconds);
+        band.smoothedGainDb.reset (sampleRate, smoothingSeconds);
+        band.smoothedQ.reset (sampleRate, smoothingSeconds);
 
-    // Start on the current parameter values so the first block is not a ramp
-    // from a stale value.
-    smoothedFrequency.setCurrentAndTargetValue (frequencyParameter->load());
-    smoothedGainDb.setCurrentAndTargetValue (gainParameter->load());
-    smoothedQ.setCurrentAndTargetValue (qParameter->load());
+        // Start on the current parameter values so the first block is not a ramp
+        // from a stale value.
+        band.smoothedFrequency.setCurrentAndTargetValue (band.frequencyParameter->load());
+        band.smoothedGainDb.setCurrentAndTargetValue (band.gainParameter->load());
+        band.smoothedQ.setCurrentAndTargetValue (band.qParameter->load());
 
-    for (auto& filter : filters)
-        filter.reset();
+        for (auto& filter : band.filters)
+            filter.reset();
+    }
 
     // 10 ms is long enough to be inaudible and short enough to feel instant.
     constexpr double bypassFadeSeconds = 0.01;
@@ -160,39 +182,36 @@ void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
     if (sampleRate <= 0.0)
         return;
 
-    // Never let the centre reach Nyquist: the biquad math degenerates there.
     // At unity gain the biquad is only mathematically transparent: on hardware
     // with fused multiply-add (Apple silicon) the residual is not bit-exact, so
     // snap to an exact pass-through instead. The audible difference at this
     // threshold is below 0.001 dB.
     constexpr float transparentThresholdDb = 1.0e-3f;
 
-    if (std::abs (smoothedGainDb.getCurrentValue()) < transparentThresholdDb)
+    for (auto& band : bands)
     {
-        const auto identity = waives::peak::identity();
+        const auto gainDb = band.smoothedGainDb.getCurrentValue();
+        const bool transparent = std::abs (gainDb) < transparentThresholdDb;
 
-        for (auto& filter : filters)
+        // Everything returns by value, so this never allocates and is safe to
+        // call from the audio thread.
+        const auto normalised = transparent
+            ? waives::peak::identity()
+            : waives::peak::normalise (waives::peak::makePeakCoefficients (
+                  sampleRate,
+                  { band.smoothedFrequency.getCurrentValue(), gainDb,
+                    band.smoothedQ.getCurrentValue() }));
+
+        for (auto& filter : band.filters)
         {
-            // A leftover z1/z2 from the previous coefficients would leak the old
-            // tail into the first samples, so clear the state on the transition.
-            filter.reset();
-            filter.setCoefficients (identity);
+            // A leftover z1/z2 would leak the previous tail into the first
+            // samples, so a band that turns transparent starts from zero.
+            if (transparent)
+                filter.reset();
+
+            filter.setCoefficients (normalised);
         }
-
-        return;
     }
-
-    const waives::peak::BandSettings band { smoothedFrequency.getCurrentValue(),
-                                            smoothedGainDb.getCurrentValue(),
-                                            smoothedQ.getCurrentValue() };
-
-    // Everything returns by value, so this never allocates and is safe to call
-    // from the audio thread.
-    const auto normalised = waives::peak::normalise (
-        waives::peak::makePeakCoefficients (sampleRate, band));
-
-    for (auto& filter : filters)
-        filter.setCoefficients (normalised);
 }
 
 void MyFirstMasteringEQAudioProcessor::releaseResources()
@@ -227,13 +246,17 @@ void MyFirstMasteringEQAudioProcessor::processBlock (juce::AudioBuffer<float>& b
     for (int channel = getTotalNumInputChannels(); channel < numOutputChannels; ++channel)
         buffer.clear (channel, 0, numSamples);
 
-    const int channelsToProcess = juce::jmin (numOutputChannels, (int) filters.size());
+    const int channelsToProcess = juce::jmin (numOutputChannels, (int) bands.front().filters.size());
 
     // 3) Retuning happens inside processWet(), which only recomputes while a
     //    parameter is moving.
-    smoothedFrequency.setTargetValue (frequencyParameter->load());
-    smoothedGainDb.setTargetValue (gainParameter->load());
-    smoothedQ.setTargetValue (qParameter->load());
+    for (auto& band : bands)
+    {
+        band.smoothedFrequency.setTargetValue (band.frequencyParameter->load());
+        band.smoothedGainDb.setTargetValue (band.gainParameter->load());
+        band.smoothedQ.setTargetValue (band.qParameter->load());
+    }
+
     smoothedWet.setTargetValue (bypassParameter->load() > 0.5f ? 0.0f : 1.0f);
 
     // 4) The host may pass a block longer than the one announced in
@@ -293,22 +316,28 @@ void MyFirstMasteringEQAudioProcessor::processWet (juce::AudioBuffer<float>& buf
                                                    int length,
                                                    int channelsToProcess)
 {
-    // One independent biquad per channel; the state must not be shared.
+    // The bands are chained, so each sample runs through them in turn. Channel
+    // state stays separate; the coefficients are shared between channels.
     const auto processRange = [this, &buffer, channelsToProcess] (int rangeStart, int rangeLength)
     {
         for (int channel = 0; channel < channelsToProcess; ++channel)
         {
             auto* samples = buffer.getWritePointer (channel) + rangeStart;
-            auto& filter = filters[(size_t) channel];
 
-            for (int i = 0; i < rangeLength; ++i)
-                samples[i] = filter.processSample (samples[i]);
+            for (auto& band : bands)
+            {
+                auto& filter = band.filters[(size_t) channel];
+
+                for (int i = 0; i < rangeLength; ++i)
+                    samples[i] = filter.processSample (samples[i]);
+            }
         }
     };
 
-    const bool isSmoothing = smoothedFrequency.isSmoothing()
-                          || smoothedGainDb.isSmoothing()
-                          || smoothedQ.isSmoothing();
+    bool isSmoothing = false;
+
+    for (const auto& band : bands)
+        isSmoothing = isSmoothing || band.isSmoothing();
 
     if (! isSmoothing)
     {
@@ -325,11 +354,14 @@ void MyFirstMasteringEQAudioProcessor::processWet (juce::AudioBuffer<float>& buf
     {
         const int step = juce::jmin (maximumRetuneInterval, length - offset);
 
-        smoothedFrequency.skip (step);
-        smoothedGainDb.skip (step);
-        smoothedQ.skip (step);
-        updateFilterCoefficients();
+        for (auto& band : bands)
+        {
+            band.smoothedFrequency.skip (step);
+            band.smoothedGainDb.skip (step);
+            band.smoothedQ.skip (step);
+        }
 
+        updateFilterCoefficients();
         processRange (start + offset, step);
     }
 }
@@ -405,9 +437,14 @@ void MyFirstMasteringEQAudioProcessor::applyFactoryPreset (int index)
             parameter->setValueNotifyingHost (parameter->convertTo0to1 (realValue));
     };
 
-    apply (ParamIDs::frequency, preset.frequency);
-    apply (ParamIDs::gain, preset.gainDb);
-    apply (ParamIDs::q, preset.q);
+    apply (ParamIDs::frequency[0], preset.frequency);
+    apply (ParamIDs::gain[0], preset.gainDb);
+    apply (ParamIDs::q[0], preset.q);
+
+    // A preset describes the whole sound, so the other bands go flat. Their
+    // frequency and Q are left alone so the layout the user built survives.
+    for (int band = 1; band < ParamIDs::numBands; ++band)
+        apply (ParamIDs::gain[(size_t) band], 0.0f);
 
     currentProgram.store (index, std::memory_order_relaxed);
 }
