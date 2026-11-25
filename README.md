@@ -1,5 +1,9 @@
 # waives
 
+[![build](https://github.com/ymmmtym/waives/actions/workflows/build.yml/badge.svg)](https://github.com/ymmmtym/waives/actions/workflows/build.yml)
+[![release](https://github.com/ymmmtym/waives/actions/workflows/release.yml/badge.svg)](https://github.com/ymmmtym/waives/releases)
+[![license: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
 JUCE 製オーディオプラグインのモノレポ。プラグインは 1 ディレクトリ 1 本で `plugins/` 以下に並ぶ。
 Linux では VST3 / CLAP / スタンドアローンを、macOS では加えて AU をビルドする。
 
@@ -35,6 +39,72 @@ plugins/<PluginName>/
 | CLAP | [clap-juce-extensions](https://github.com/free-audio/clap-juce-extensions)（JUCE 本体には CLAP 出力がないため） |
 | C++ | C++17 |
 | ビルド | CMake + Ninja |
+
+## すぐ使う（ビルド不要）
+
+[Releases](https://github.com/ymmmtym/waives/releases) にビルド済みのバンドルがある。
+main にマージするたびに自動で作られ、タグは `v<バージョン>-<短い SHA>`（例 `v0.1.0-1899315`）。
+バージョンはリポジトリ直下の `VERSION` で決まる。
+
+| ファイル | 中身 |
+|----------|------|
+| `MyFirstMasteringEQ-linux.tar.gz` | VST3 / CLAP / Standalone |
+| `MyFirstMasteringEQ-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
+| `SHA256SUMS` | 上記のチェックサム |
+
+展開すると `MyFirstMasteringEQ_artefacts/Release/`、`LICENSE`、
+`THIRD-PARTY-NOTICES.md` が出てくる。
+
+### Linux
+
+```bash
+# 検証に失敗した時点で止める
+set -e
+
+# これから展開するアーカイブだけを検証する（両方落としていれば
+# `sha256sum -c SHA256SUMS` でまとめて検証してもよい）
+grep -F '  MyFirstMasteringEQ-linux.tar.gz' SHA256SUMS | sha256sum -c -
+
+tar -xzf MyFirstMasteringEQ-linux.tar.gz
+
+mkdir -p ~/.vst3 ~/.clap ~/.local/bin
+cp -R MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/.vst3/
+cp -R MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap ~/.clap/
+install -Dm755 MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringEQ \
+    ~/.local/bin/MyFirstMasteringEQ
+```
+
+### macOS
+
+macOS には `sha256sum` が無いので `shasum` を使う。
+
+```bash
+# 検証に失敗した時点で止める
+set -e
+
+# これから展開するアーカイブだけを検証する（両方落としていれば
+# `shasum -a 256 -c SHA256SUMS` でまとめて検証してもよい）
+grep -F '  MyFirstMasteringEQ-macos.tar.gz' SHA256SUMS | shasum -a 256 -c -
+
+tar -xzf MyFirstMasteringEQ-macos.tar.gz
+
+mkdir -p ~/Library/Audio/Plug-Ins/{Components,VST3,CLAP}
+
+# バンドル本体をコピーする（AU/ や VST3/ のディレクトリごとではない）
+cp -R MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+      ~/Library/Audio/Plug-Ins/Components/
+cp -R MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 \
+      ~/Library/Audio/Plug-Ins/VST3/
+cp -R MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap \
+      ~/Library/Audio/Plug-Ins/CLAP/
+
+# スタンドアローンは .app。そのまま起動するか /Applications へ移す
+open MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringEQ.app
+```
+
+配布物はアドホック署名なので、Gatekeeper の隔離属性を外す必要がある（§7 を参照）。
+
+自分でビルドする場合は §1 以降に進む。
 
 ## 1. Linux の依存パッケージ
 
@@ -371,3 +441,35 @@ cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 ./scripts/install-linux.sh
 ```
+
+## ライセンス
+
+本リポジトリは **AGPL-3.0**（[LICENSE](LICENSE)）。第三者コンポーネントの表示は
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にまとめてある。
+
+### なぜ AGPL-3.0 なのか
+
+- JUCE 9 は **AGPLv3 と商用 EULA のデュアルライセンス**（[JUCE Licensing FAQ](https://juce.com/get-juce/#licensing-faq)）。
+  AGPL を選べば追加費用なしで利用できる。
+- 商用 EULA 側は Starter が年間売上 $20,000 まで無料、Indie が $40/月（$300,000 まで）、
+  Pro が $175/月（[JUCE 9 EULA 1.2](https://juce.com/legal/juce-9-licence/)）。
+
+### 使う側の義務
+
+- 改変していないバイナリを配布するときは、対応するソースを提供する（本リポジトリが該当）
+- 改変版（バイナリを含む）を配布するときは、改変を含む対応するソースを提供し、
+  同じ AGPL-3.0 で公開する
+
+プラグインを DAW で使うだけなら、これらの義務は発生しない。
+
+### クローズドソースで配布したい場合
+
+- 著作権者（リポジトリ所有者）は自分のコードを別ライセンスでも提供できる。
+  AGPL はあくまで第三者の利用条件を定めるもの
+- JUCE 側は AGPL ではなく商用ライセンス（Starter 以上）に切り替える必要がある
+- JUCE 9 EULA 2.3 は「フレームワークを、ソース開示を要求するオープンソースライセンスの
+  対象にしないこと」を求めている。したがって **AGPL と商用 EULA は併用できない**
+  （どちらか一方を選ぶ）
+
+ライセンスを変更する場合は `LICENSE` を差し替え、この節と
+`THIRD-PARTY-NOTICES.md` を更新すること。
