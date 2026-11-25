@@ -32,6 +32,7 @@ private:
     void updateInfoLabel();
     void attachKnobsToBand (int band);
     void updateBandButtons();
+    void setSolo (bool shouldSolo);
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -55,6 +56,8 @@ private:
     juce::Slider qSlider;
 
     std::array<std::unique_ptr<juce::TextButton>, 4> bandButtons;
+    juce::TextButton soloButton;
+    juce::TextButton bandBypassButton;
     juce::ComboBox presetBox;
     juce::ToggleButton bypassButton;
 
@@ -65,6 +68,7 @@ private:
     std::unique_ptr<SliderAttachment> gainAttachment;
     std::unique_ptr<SliderAttachment> qAttachment;
     std::unique_ptr<ButtonAttachment> bypassAttachment;
+    std::unique_ptr<ButtonAttachment> bandBypassAttachment;
 
     // -1 until the constructor picks band 1, so selectBand() always runs once.
     int selectedBand = -1;

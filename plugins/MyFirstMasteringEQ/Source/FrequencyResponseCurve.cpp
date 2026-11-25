@@ -143,6 +143,9 @@ FrequencyResponseCurve::Snapshot FrequencyResponseCurve::readSnapshot() const
         snapshot.bands[index].frequency = apvts.getRawParameterValue (ParamIDs::frequency[index])->load();
         snapshot.bands[index].gainDb    = apvts.getRawParameterValue (ParamIDs::gain[index])->load();
         snapshot.bands[index].q         = apvts.getRawParameterValue (ParamIDs::q[index])->load();
+
+        const auto bypassed = apvts.getRawParameterValue (ParamIDs::bandBypass[index])->load() > 0.5f;
+        snapshot.active[index] = ! bypassed && (soloBand < 0 || soloBand == band);
     }
 
     snapshot.sampleRate = getSampleRate();
@@ -159,7 +162,8 @@ bool FrequencyResponseCurve::isDifferent (const Snapshot& a, const Snapshot& b) 
 
     for (size_t band = 0; band < a.bands.size(); ++band)
     {
-        if (std::abs (a.bands[band].frequency - b.bands[band].frequency) > tolerance
+        if (a.active[band] != b.active[band]
+            || std::abs (a.bands[band].frequency - b.bands[band].frequency) > tolerance
             || std::abs (a.bands[band].gainDb - b.bands[band].gainDb) > tolerance
             || std::abs (a.bands[band].q - b.bands[band].q) > tolerance)
             return true;
@@ -186,7 +190,24 @@ void FrequencyResponseCurve::timerCallback()
 
 float FrequencyResponseCurve::combinedResponseDbAt (double hz) const
 {
-    return waives::peak::combinedResponseDb (effectiveSampleRate(), lastSnapshot.bands, hz);
+    auto chain = lastSnapshot.bands;
+
+    for (size_t band = 0; band < chain.size(); ++band)
+        if (! lastSnapshot.active[band])
+            chain[band].gainDb = 0.0f;
+
+    return waives::peak::combinedResponseDb (effectiveSampleRate(), chain, hz);
+}
+
+void FrequencyResponseCurve::setSoloBand (int band) noexcept
+{
+    const auto clamped = juce::isPositiveAndBelow (band, ParamIDs::numBands) ? band : -1;
+
+    if (clamped == soloBand)
+        return;
+
+    soloBand = clamped;
+    refreshNow();
 }
 
 //==============================================================================
@@ -408,13 +429,14 @@ void FrequencyResponseCurve::paintBand (juce::Graphics& g, juce::Rectangle<float
     const auto rate = effectiveSampleRate();
     const auto colour = waives::ui::bandColour (band);
     const bool isSelected = band == selectedBand;
+    const bool active = lastSnapshot.active[(size_t) band];
 
     const auto path = makeCurvePath (plot, [&] (double hz)
     {
         return waives::peak::responseDb (rate, settings, hz);
     });
 
-    g.setColour (colour.withAlpha (isSelected ? 0.9f : 0.35f));
+    g.setColour (colour.withAlpha (! active ? 0.15f : (isSelected ? 0.9f : 0.35f)));
     g.strokePath (path, juce::PathStrokeType (isSelected ? 1.6f : 1.0f));
 }
 
@@ -449,6 +471,7 @@ void FrequencyResponseCurve::paintNodes (juce::Graphics& g, juce::Rectangle<floa
             const auto centre = nodePosition (band, plot);
             const auto colour = waives::ui::bandColour (band);
             const auto radius = isSelected ? nodeRadius + 1.5f : nodeRadius;
+            const bool active = lastSnapshot.active[(size_t) band];
 
             g.setColour (background.withAlpha (0.85f));
             g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre));
@@ -457,11 +480,14 @@ void FrequencyResponseCurve::paintNodes (juce::Graphics& g, juce::Rectangle<floa
             g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre),
                            isSelected ? 2.0f : 1.2f);
 
-            g.setColour (colour);
-            g.fillEllipse (juce::Rectangle<float> (radius, radius).withCentre (centre));
+            if (active)
+            {
+                g.setColour (colour);
+                g.fillEllipse (juce::Rectangle<float> (radius, radius).withCentre (centre));
+            }
 
             g.setFont (juce::Font (juce::FontOptions (9.5f, juce::Font::bold)));
-            g.setColour (textContrastFor (colour));
+            g.setColour (active ? textContrastFor (colour) : colour);
             g.drawText (juce::String (band + 1),
                         juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre),
                         juce::Justification::centred, false);

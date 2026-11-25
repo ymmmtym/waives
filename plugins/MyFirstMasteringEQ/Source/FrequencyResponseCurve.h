@@ -27,6 +27,10 @@ public:
 
     /** The band the editor is editing; it is drawn brighter than the others. */
     void setSelectedBand (int band) noexcept;
+
+    /** The band the user is listening to alone, or -1. Bypassed and solo-muted
+        bands are dimmed and left out of the combined curve. */
+    void setSoloBand (int band) noexcept;
     int getSelectedBand() const noexcept { return selectedBand; }
 
     /** The combined curve in dB at `hz`, computed the way paint() does. */
@@ -65,6 +69,8 @@ private:
     struct Snapshot
     {
         std::array<waives::peak::BandSettings, waives::peak::maxBands> bands {};
+        /** False when the band is bypassed or muted by a solo. */
+        std::array<bool, waives::peak::maxBands> active {};
         double sampleRate = 0.0;
     };
 
@@ -95,6 +101,7 @@ private:
 
     Snapshot lastSnapshot;
     int selectedBand = 0;
+    int soloBand = -1;
 
     Drag drag;
 

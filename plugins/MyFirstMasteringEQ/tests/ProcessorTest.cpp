@@ -190,8 +190,8 @@ int main()
     // Parameters
     auto& apvts = processor.getValueTreeState();
 
-    check (processor.getParameters().size() == 3 * ParamIDs::numBands + 1,
-           "each band publishes freq/gain/q, plus the bypass switch");
+    check (processor.getParameters().size() == 4 * ParamIDs::numBands + 1,
+           "each band publishes freq/gain/q and its own bypass, plus the global bypass");
 
     auto* freqParam = apvts.getParameter (ParamIDs::frequency[0]);
     auto* gainParam = apvts.getParameter (ParamIDs::gain[0]);
@@ -575,6 +575,161 @@ int main()
     }
 
     //==========================================================================
+    // Band bypass and solo: switching a band off must leave the other bands
+    // alone, and a solo must mute everything except the band being listened to.
+    {
+        flattenBands (processor);
+        setParameterValue (processor, ParamIDs::frequency[0], 1000.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 12.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
+
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 1000.0) - 12.0) < 0.5,
+               "the band is heard before it is switched off");
+
+        setParameterValue (processor, ParamIDs::bandBypass[0], 1.0f);
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 1000.0)) < 0.5,
+               "a bypassed band stops colouring its frequency");
+
+        setParameterValue (processor, ParamIDs::bandBypass[0], 0.0f);
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 1000.0) - 12.0) < 0.5,
+               "the band comes back when its bypass is released");
+
+        // Band 2 must keep working while band 1 is switched off.
+        setParameterValue (processor, ParamIDs::frequency[1], 2000.0f);
+        setParameterValue (processor, ParamIDs::gain[1], -6.0f);
+        setParameterValue (processor, ParamIDs::q[1], 1.0f);
+        setParameterValue (processor, ParamIDs::bandBypass[0], 1.0f);
+
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 2000.0) - (-6.0)) < 0.5,
+               "bypassing one band leaves the others working");
+
+        setParameterValue (processor, ParamIDs::bandBypass[0], 0.0f);
+
+        // Solo: only the chosen band is heard.
+        flattenBands (processor);
+        setParameterValue (processor, ParamIDs::frequency[0], 1000.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 9.0f);
+        setParameterValue (processor, ParamIDs::frequency[1], 4000.0f);
+        setParameterValue (processor, ParamIDs::gain[1], -9.0f);
+
+        const std::array<waives::peak::BandSettings, ParamIDs::numBands> bothBands {{
+            { 1000.0f,  9.0f, 1.0f },
+            { 4000.0f, -9.0f, 1.0f },
+            { 1000.0f,  0.0f, 1.0f },
+            { 1000.0f,  0.0f, 1.0f },
+        }};
+
+        const std::array<waives::peak::BandSettings, ParamIDs::numBands> band1Only {{
+            { 1000.0f, 9.0f, 1.0f },
+            { 1000.0f, 0.0f, 1.0f },
+            { 1000.0f, 0.0f, 1.0f },
+            { 1000.0f, 0.0f, 1.0f },
+        }};
+
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 4000.0)
+                         - waives::peak::combinedResponseDb (sampleRate, bothBands, 4000.0)) < 0.5,
+               "band 2 is heard before the solo starts");
+
+        processor.setSoloBand (0);
+        check (processor.getSoloBand() == 0, "the solo can be read back");
+
+        for (const double probeHz : { 1000.0, 4000.0 })
+        {
+            const auto measured = measureCurrentSettingsDb (processor, sampleRate, probeHz);
+            const auto expected = waives::peak::combinedResponseDb (sampleRate, band1Only, probeHz);
+
+            const auto label = juce::String ("a solo leaves band 1 alone at ")
+                             + juce::String (probeHz, 0) + " Hz";
+
+            check (std::abs (measured - expected) < 0.5, label.toRawUTF8());
+        }
+
+        processor.setSoloBand (-1);
+        check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 4000.0)
+                         - waives::peak::combinedResponseDb (sampleRate, bothBands, 4000.0)) < 0.5,
+               "clearing the solo brings the other bands back");
+
+        processor.setSoloBand (ParamIDs::numBands);
+        check (processor.getSoloBand() == -1, "an out-of-range solo is ignored");
+
+        // A solo is a listening aid, so it must not travel with the session.
+        processor.setSoloBand (1);
+
+        juce::MemoryBlock soloedState;
+        processor.getStateInformation (soloedState);
+
+        MyFirstMasteringEQAudioProcessor reloaded;
+        reloaded.setStateInformation (soloedState.getData(), (int) soloedState.getSize());
+
+        check (reloaded.getSoloBand() == -1, "a reloaded session is not left in solo");
+
+        processor.setSoloBand (-1);
+
+        // Switching a band must fade, exactly like the global bypass does.
+        flattenBands (processor);
+        setParameterValue (processor, ParamIDs::frequency[0], 1000.0f);
+        setParameterValue (processor, ParamIDs::gain[0], 18.0f);
+        setParameterValue (processor, ParamIDs::q[0], 1.0f);
+
+        processor.setPlayConfigDetails (1, 1, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+
+        juce::AudioBuffer<float> bandWarmUp (1, blockSize);
+
+        for (int block = 0; block < 20; ++block)
+        {
+            fillWithSine (bandWarmUp, 1000.0, sampleRate);
+            processor.processBlock (bandWarmUp, midi);
+        }
+
+        setParameterValue (processor, ParamIDs::bandBypass[0], 1.0f);
+
+        constexpr int fadeLength = 2048;   // ~43 ms, several times the 10 ms fade
+        juce::AudioBuffer<float> bandFade (1, fadeLength);
+        fillWithSine (bandFade, 1000.0, sampleRate);
+        const juce::AudioBuffer<float> bandFadeInput (bandFade);
+
+        processor.processBlock (bandFade, midi);
+
+        const auto rmsOf = [] (const juce::AudioBuffer<float>& audio, int start, int length)
+        {
+            double sum = 0.0;
+
+            for (int i = 0; i < length; ++i)
+            {
+                const auto value = (double) audio.getSample (0, start + i);
+                sum += value * value;
+            }
+
+            return std::sqrt (sum / length);
+        };
+
+        const auto earlyDb = juce::Decibels::gainToDecibels (rmsOf (bandFade, 0, 96)
+                                                             / rmsOf (bandFadeInput, 0, 96));
+        const auto settledDb = juce::Decibels::gainToDecibels (
+            rmsOf (bandFade, fadeLength - 480, 480) / rmsOf (bandFadeInput, fadeLength - 480, 480));
+
+        check (earlyDb > 6.0, "the band fade starts from the boosted signal");
+        check (std::abs (settledDb) < 0.1, "the band fade reaches the dry signal");
+
+        double maxStep = 0.0;
+
+        for (int i = 1; i < fadeLength; ++i)
+            maxStep = juce::jmax (maxStep,
+                                  (double) std::abs (bandFade.getSample (0, i)
+                                                     - bandFade.getSample (0, i - 1)));
+
+        const auto boostedAmplitude = (double) juce::Decibels::decibelsToGain (18.0f);
+        const auto naturalStep = 2.0 * boostedAmplitude
+                               * std::sin (juce::MathConstants<double>::pi * 1000.0 / sampleRate);
+
+        check (maxStep < naturalStep * 1.15, "switching a band does not step the output");
+
+        setParameterValue (processor, ParamIDs::bandBypass[0], 0.0f);
+        flattenBands (processor);
+    }
+
+    //==========================================================================
     // A session saved by the one-band build only carries band 1's parameters;
     // the rest must stay at 0 dB so the sound does not change on reload.
     {
@@ -593,7 +748,8 @@ int main()
 
             for (const auto* parameterID : { ParamIDs::frequency[index],
                                              ParamIDs::gain[index],
-                                             ParamIDs::q[index] })
+                                             ParamIDs::q[index],
+                                             ParamIDs::bandBypass[index] })
             {
                 // APVTS children are PARAM nodes; the parameter ID is a property.
                 auto child = legacyState.getChildWithProperty ("id", parameterID);
@@ -602,6 +758,10 @@ int main()
                     legacyState.removeChild (child, nullptr);
             }
         }
+
+        // Band 1's own bypass is newer than v0.1.0 as well.
+        if (auto child = legacyState.getChildWithProperty ("id", ParamIDs::bandBypass[0]); child.isValid())
+            legacyState.removeChild (child, nullptr);
 
         // freq, gain, q and bypass are all a v0.1.0 session could hold.
         check (legacyState.getNumChildren() == 4,
@@ -743,6 +903,67 @@ int main()
                 check (std::abs (editorState.getRawParameterValue (ParamIDs::gain[2])->load() - (-7.0f)) < 0.01f,
                        "dragging one node leaves the other bands alone");
 
+                // The band row carries the solo and band-off switches.
+                auto* soloButton = dynamic_cast<juce::Button*> (editor->findChildWithID ("soloButton"));
+                auto* bandOffButton = dynamic_cast<juce::Button*> (editor->findChildWithID ("bandBypassButton"));
+
+                check (soloButton != nullptr && bandOffButton != nullptr,
+                       "the editor exposes the solo and band-off buttons");
+
+                if (soloButton != nullptr && bandOffButton != nullptr)
+                {
+                    setParameterValue (editorProcessor, ParamIDs::frequency[1], 3000.0f);
+                    setParameterValue (editorProcessor, ParamIDs::gain[1], 12.0f);
+                    setParameterValue (editorProcessor, ParamIDs::q[1], 1.0f);
+
+                    // triggerClick() only posts a message, so drive the click path
+                    // synchronously the way a real press would.
+                    const auto press = [] (juce::Button& button)
+                    {
+                        button.setToggleState (! button.getToggleState(), juce::sendNotificationSync);
+                    };
+
+                    editor->selectBand (1);
+                    press (*soloButton);
+
+                    check (soloButton->getToggleState(), "the solo button latches");
+                    check (editorProcessor.getSoloBand() == 1, "solo points at the selected band");
+
+                    // The graph has to agree with the sound: only the soloed band
+                    // feeds the combined curve.
+                    curve->refreshNow();
+                    const auto soloDrawn = curve->combinedResponseDbAt (3000.0);
+                    const auto bandAlone = waives::peak::responseDb (
+                        editorProcessor.getCurrentSampleRate(), { 3000.0f, 12.0f, 1.0f }, 3000.0);
+
+                    check (std::abs (soloDrawn - bandAlone) < 0.1f,
+                           "the graph drops the other bands during a solo");
+
+                    editor->selectBand (3);
+                    check (editorProcessor.getSoloBand() == 3, "the solo follows the band selection");
+
+                    press (*soloButton);
+                    check (editorProcessor.getSoloBand() == -1, "clicking solo again clears it");
+
+                    editor->selectBand (1);
+                    curve->refreshNow();
+                    const auto withBand = curve->combinedResponseDbAt (3000.0);
+
+                    press (*bandOffButton);
+                    check (editorState.getRawParameterValue (ParamIDs::bandBypass[1])->load() > 0.5f,
+                           "band off writes the selected band's bypass");
+
+                    curve->refreshNow();
+                    const auto withoutBand = curve->combinedResponseDbAt (3000.0);
+
+                    check (std::abs ((withBand - withoutBand) - 12.0f) < 0.2f,
+                           "a band that is switched off leaves the combined curve");
+
+                    press (*bandOffButton);
+                    check (editorState.getRawParameterValue (ParamIDs::bandBypass[1])->load() < 0.5f,
+                           "band off releases again");
+                }
+
                 // The thick curve is the sum of the individual bands.
                 setParameterValue (editorProcessor, ParamIDs::frequency[0], 500.0f);
                 setParameterValue (editorProcessor, ParamIDs::gain[0], 9.0f);
@@ -782,6 +1003,12 @@ int main()
                 editor->setSize (900, 760);
                 check (curve->getBounds().getHeight() > 0,
                        "the layout survives the largest size");
+
+                // Closing the window must not leave a band soloed.
+                editorProcessor.setSoloBand (2);
+                editor.reset();
+
+                check (editorProcessor.getSoloBand() == -1, "closing the editor clears the solo");
 
                 // The node is drawn at the Nyquist-clamped frequency, which is below
                 // the parameter at low sample rates. A gain-only drag must not carry
