@@ -21,8 +21,8 @@
 |------|------|
 | フレームワーク | JUCE（最新安定版） |
 | 言語 | C++17以降 |
-| macOSビルド | Xcode |
-| Linuxビルド | CMake or Makefile |
+| macOSビルド | CMake（Xcode ジェネレータ可） |
+| Linuxビルド | CMake + Ninja |
 | プラグイン形式 | AU（必須）+ VST3 + CLAP + スタンドアーン |
 | テスト用ホスト（macOS） | Logic Pro |
 | テスト用ホスト（Linux） | Carla / JUCEスタンドアローン |
@@ -108,20 +108,46 @@
 
 ---
 
-## 6. ディレクトリ構成（目標）
+## 6. ディレクトリ構成（モノレポ）
+
+複数のプラグインを 1 リポジトリで開発する。**1 プラグイン = 1 ディレクトリ**。
 
 ```
-MyFirstMasteringEQ/
-├── MyFirstMasteringEQ.jucer       # Projucerプロジェクトファイル
-├── Source/
-│   ├── PluginProcessor.h            # AudioProcessorヘッダー
-│   ├── PluginProcessor.cpp          # AudioProcessor実装（DSP）
-│   ├── PluginEditor.h               # UIヘッダー
-│   ├── PluginEditor.cpp             # UI実装
-│   └── FrequencyResponseCurve.h     # 周波数特性描画コンポーネント（Step 5）
-├── Builds/                          # ビルド出力（Projucer管理）
-└── AGENTS.md                        # このファイル
+waives/
+├── CMakeLists.txt                   # WAIVES_PLUGINS に登録されたプラグインを add_subdirectory
+├── cmake/
+│   ├── Dependencies.cmake           # JUCE / clap-juce-extensions（共通）
+│   └── WaivesPlugin.cmake           # waives_add_plugin() / waives_add_plugin_tests()
+├── plugins/
+│   └── MyFirstMasteringEQ/
+│       ├── CMakeLists.txt           # そのプラグイン固有の設定だけ
+│       ├── Source/
+│       │   ├── PluginProcessor.h/.cpp
+│       │   ├── PluginEditor.h/.cpp
+│       │   └── FrequencyResponseCurve.h/.cpp
+│       └── tests/ProcessorTest.cpp  # ヘッドレステスト（ctest に自動登録）
+├── tests/TestUtilities.h            # 全プラグイン共通のテストヘルパー
+├── scripts/install-linux.sh         # ビルド済みプラグインを一括インストール
+├── .github/workflows/build.yml      # plugin × OS のマトリクス
+├── AGENTS.md
+└── README.md
 ```
+
+### プラグインを追加するときのルール
+
+1. `plugins/<Name>/` を作り、`CMakeLists.txt` で `waives_add_plugin()` を呼ぶ
+2. **`PLUGIN_CODE` は 4 文字で全体で一意**（重複すると configure がエラーで止まる）。
+   `auval -v aufx <PLUGIN_CODE> <MANUFACTURER_CODE>` で使われる
+3. `BUNDLE_ID` / `CLAP_ID` も一意にする
+4. パラメータ ID はプラグイン内で一意（プラグイン間で衝突しても実害はないが、揃えておく）
+5. ルート `CMakeLists.txt` の `WAIVES_PLUGINS` と CI の `matrix.plugin` に追加する
+6. 出力形式（VST3 / CLAP / Standalone / AU）は共通ヘルパーが決めるので書かない
+
+### プラグイン間で共有したいコード
+
+DSP や UI 部品を複数プラグインで共有するときは `shared/` を作り、
+そこに `waives_shared` のような INTERFACE / STATIC ライブラリを定義して
+各プラグインの `LINK_LIBRARIES` から参照する（現時点では未作成）。
 
 ---
 

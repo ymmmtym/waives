@@ -1,7 +1,7 @@
 name: build
 
-# Linux: VST3 + CLAP + Standalone.  macOS: the same plus AU (.component).
-# Every job uploads its bundles as a downloadable artifact.
+# One job per plugin per platform. Linux builds VST3 + CLAP + Standalone;
+# macOS adds AU and validates it with auval. Every job uploads a tarball.
 
 on:
   push:
@@ -14,16 +14,19 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.plugin }} / ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # A plugin row here is multiplied by every platform row. Add a plugin
+        # once it appears in WAIVES_PLUGINS in CMakeLists.txt.
+        plugin: [MyFirstMasteringEQ]
+        platform: [linux, macos]
         include:
-          - name: linux
+          - platform: linux
             os: ubuntu-latest
-            extra_cmake_args: ''
-          - name: macos
+          - platform: macos
             os: macos-latest
             # Universal AU so it runs natively on both Apple silicon and Intel.
             extra_cmake_args: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"'
@@ -48,7 +51,7 @@ jobs:
           path: .cache/fetchcontent
           # The cache holds generated CMake files with absolute paths, so the two
           # jobs must never share an entry.
-          key: fetchcontent-${{ matrix.name }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
+          key: fetchcontent-${{ matrix.platform }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake_args }}
@@ -61,12 +64,18 @@ jobs:
 
       - name: Validate AU
         if: runner.os == 'macOS'
+        env:
+          PLUGIN: ${{ matrix.plugin }}
         run: |
           set -x
-          component="$HOME/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component"
+          # cmake/WaivesPlugin.cmake writes the AU codes so they are defined in
+          # one place only.
+          read -r au_type au_code au_manufacturer < "build/au_code_${PLUGIN}.txt"
+
+          component="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN}.component"
           mkdir -p "$(dirname "$component")"
           rm -rf "$component"
-          cp -R build/MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+          cp -R "build/plugins/${PLUGIN}/${PLUGIN}_artefacts/Release/AU/${PLUGIN}.component" \
                 "$(dirname "$component")/"
 
           # arm64 macOS refuses to load unsigned code, and the audio component
@@ -76,10 +85,10 @@ jobs:
           killall -9 AudioComponentRegistrar || true
           sleep 3
 
-          auval -a 2>&1 | grep -i mfmq || echo "component not listed by auval -a"
+          auval -a 2>&1 | grep -i "$au_code" || echo "component not listed by auval -a"
 
           for attempt in 1 2 3; do
-            if auval -v aufx Mfmq Myau; then
+            if auval -v "$au_type" "$au_code" "$au_manufacturer"; then
               exit 0
             fi
             echo "auval attempt $attempt failed, restarting the registrar"
@@ -91,15 +100,17 @@ jobs:
       # upload-artifact resets file modes to 0644, which breaks the standalone
       # binary and the installer's -x check. A tarball keeps the permissions.
       - name: Package plugin bundles
+        env:
+          PLUGIN: ${{ matrix.plugin }}
         run: |
           mkdir -p dist
-          tar -czf "dist/MyFirstMasteringEQ-${{ matrix.name }}.tar.gz" \
-              -C build/MyFirstMasteringEQ_artefacts Release
+          tar -czf "dist/${PLUGIN}-${{ matrix.platform }}.tar.gz" \
+              -C "build/plugins/${PLUGIN}" "${PLUGIN}_artefacts/Release"
 
       - name: Upload plugin bundles
         uses: actions/upload-artifact@v4
         with:
-          name: MyFirstMasteringEQ-${{ matrix.name }}
-          path: dist/MyFirstMasteringEQ-${{ matrix.name }}.tar.gz
+          name: ${{ matrix.plugin }}-${{ matrix.platform }}
+          path: dist/${{ matrix.plugin }}-${{ matrix.platform }}.tar.gz
           if-no-files-found: error
           retention-days: 14
