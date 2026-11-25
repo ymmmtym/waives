@@ -1,19 +1,17 @@
 name: release
 
 # Every push to main builds and tests the plugins, then publishes the bundles as
-# a GitHub Release. The tag is v<date>-<sha>; pass `version` to a manual run to
-# publish v<version> instead (e.g. 0.2.0 for the first hand-numbered release).
+# a GitHub Release. The tag is v<VERSION>-<sha>: VERSION comes from the built
+# revision, and the short SHA keeps one release per commit, so re-running a
+# workflow updates that release instead of creating another one.
+#
+# Bump VERSION in the same pull request when you want a new version number.
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version to publish, e.g. 0.2.0. Empty = v<date>-<sha>'
-        type: string
-        required: false
-        default: ''
       dry_run:
         description: 'Build and test only, do not publish a release'
         type: boolean
@@ -53,6 +51,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Needed for VERSION. checkout defaults to the triggering commit, which is
+      # also what the archives were built from.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -68,26 +70,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
-          if [ -n "${INPUT_VERSION}" ]; then
-            tag="v${INPUT_VERSION}"
-            title="Waives ${INPUT_VERSION}"
-          else
-            stamp="$(date -u +%Y.%m.%d)"
-            tag="v${stamp}-${GITHUB_SHA::7}"
-            title="Waives ${stamp} (${GITHUB_SHA::7})"
-          fi
+          version="$(cat VERSION)"
+          tag="v${version}-${GITHUB_SHA::7}"
           echo "Publishing ${tag}"
 
           # Re-running a workflow must not fail on an existing tag.
           if gh release view "${tag}" > /dev/null 2>&1; then
             gh release upload "${tag}" dist/*.tar.gz dist/SHA256SUMS --clobber
           else
+            # --target pins the tag to the commit the archives were built from:
+            # main may have moved on while the build was running.
             gh release create "${tag}" dist/*.tar.gz dist/SHA256SUMS \
-              --title "${title}" \
+              --target "${GITHUB_SHA}" \
+              --title "Waives ${version} (${GITHUB_SHA::7})" \
               --generate-notes
           fi
 

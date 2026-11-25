@@ -107,8 +107,11 @@ jobs:
           PLUGIN: ${{ inputs.plugin }}
         run: |
           mkdir -p dist
+          # CLAP and clap-juce-extensions are MIT: their notices have to travel
+          # with the binaries.
           tar -czf "dist/${PLUGIN}-${{ inputs.platform }}.tar.gz" \
-              -C "build/plugins/${PLUGIN}" "${PLUGIN}_artefacts/Release"
+              -C "build/plugins/${PLUGIN}" "${PLUGIN}_artefacts/Release" \
+              -C "$GITHUB_WORKSPACE" THIRD-PARTY-NOTICES.md
 
       - name: Upload plugin bundles
         uses: actions/upload-artifact@v4

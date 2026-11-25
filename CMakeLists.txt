@@ -1,17 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
 
-# Single source of truth for the version: plugin metadata, and the tag the
-# release workflow publishes.
+# Single source of truth for the plugin metadata version. release.yml reads the
+# same file, so a release tag names the version it actually ships.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" WAIVES_VERSION)
 string(STRIP "${WAIVES_VERSION}" WAIVES_VERSION)
+
+# file(READ) does not make the build depend on the file; without this an edited
+# VERSION would only take effect after a manual re-configure.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 project(Waives VERSION ${WAIVES_VERSION} LANGUAGES C CXX)
 
 # JUCE's CMake support looks pkg-config up itself; doing it here first turns a
 # cryptic failure inside JUCE into an actionable message.
 if(UNIX AND NOT APPLE)
-    find_program(PKG_CONFIG_EXECUTABLE pkg-config)
-    if(NOT PKG_CONFIG_EXECUTABLE)
+    # find_package honours a PKG_CONFIG environment variable and caches the
+    # result for JUCE's own find_package(PkgConfig) call later on.
+    find_package(PkgConfig QUIET)
+    if(NOT PKG_CONFIG_FOUND)
         message(FATAL_ERROR
             "pkg-config was not found, but JUCE requires it on Linux.\n"
             "  Debian/Ubuntu : sudo apt install pkg-config\n"
