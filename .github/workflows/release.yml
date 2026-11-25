@@ -1,0 +1,94 @@
+name: release
+
+# Every push to main builds and tests the plugins, then publishes the bundles as
+# a GitHub Release. The tag is v<date>-<sha>; pass `version` to a manual run to
+# publish v<version> instead (e.g. 0.2.0 for the first hand-numbered release).
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to publish, e.g. 0.2.0. Empty = v<date>-<sha>'
+        type: string
+        required: false
+        default: ''
+      dry_run:
+        description: 'Build and test only, do not publish a release'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: [MyFirstMasteringEQ]
+        platform: [linux, macos]
+        include:
+          - platform: linux
+            os: ubuntu-latest
+          - platform: macos
+            os: macos-latest
+            extra_cmake_args: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"'
+
+    uses: ./.github/workflows/_build-plugin.yml
+    with:
+      plugin: ${{ matrix.plugin }}
+      platform: ${{ matrix.platform }}
+      os: ${{ matrix.os }}
+      extra_cmake_args: ${{ matrix.extra_cmake_args }}
+      # The bundles are handed to the publish job in the same run.
+      retention_days: 1
+
+  publish:
+    name: publish release
+    needs: build
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Add checksums
+        working-directory: dist
+        run: |
+          sha256sum -- *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_VERSION}" ]; then
+            tag="v${INPUT_VERSION}"
+            title="Waives ${INPUT_VERSION}"
+          else
+            stamp="$(date -u +%Y.%m.%d)"
+            tag="v${stamp}-${GITHUB_SHA::7}"
+            title="Waives ${stamp} (${GITHUB_SHA::7})"
+          fi
+          echo "Publishing ${tag}"
+
+          # Re-running a workflow must not fail on an existing tag.
+          if gh release view "${tag}" > /dev/null 2>&1; then
+            gh release upload "${tag}" dist/*.tar.gz dist/SHA256SUMS --clobber
+          else
+            gh release create "${tag}" dist/*.tar.gz dist/SHA256SUMS \
+              --title "${title}" \
+              --generate-notes
+          fi
+
+          echo "### Release [${tag}](https://github.com/${GH_REPO}/releases/tag/${tag})" >> "$GITHUB_STEP_SUMMARY"
