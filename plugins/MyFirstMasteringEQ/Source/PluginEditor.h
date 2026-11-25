@@ -5,6 +5,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
+#include <memory>
+
 class MyFirstMasteringEQAudioProcessor;
 
 class MyFirstMasteringEQAudioProcessorEditor final : public juce::AudioProcessorEditor,
@@ -18,9 +21,17 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    /** Points the three knobs at one band. The graph calls this when a node is
+        clicked, and the band buttons call it when they are pressed. */
+    void selectBand (int band);
+
+    int getSelectedBand() const noexcept { return selectedBand; }
+
 private:
     void timerCallback() override;
     void updateInfoLabel();
+    void attachKnobsToBand (int band);
+    void updateBandButtons();
 
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -43,6 +54,7 @@ private:
     juce::Slider gainSlider;
     juce::Slider qSlider;
 
+    std::array<std::unique_ptr<juce::TextButton>, 4> bandButtons;
     juce::ComboBox presetBox;
     juce::ToggleButton bypassButton;
 
@@ -53,6 +65,9 @@ private:
     std::unique_ptr<SliderAttachment> gainAttachment;
     std::unique_ptr<SliderAttachment> qAttachment;
     std::unique_ptr<ButtonAttachment> bypassAttachment;
+
+    // -1 until the constructor picks band 1, so selectBand() always runs once.
+    int selectedBand = -1;
 
     // Must be destroyed before the components it watches, so it is last.
     juce::TooltipWindow tooltipWindow { this, 700 };

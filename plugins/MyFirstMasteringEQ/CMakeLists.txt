@@ -1,4 +1,4 @@
-# Single-band peaking EQ. Everything shared (formats, warning flags, the test
+# Four-band peaking EQ. Everything shared (formats, warning flags, the test
 # harness) lives in cmake/WaivesPlugin.cmake.
 
 set(MYEQ_SOURCES
@@ -11,7 +11,7 @@ waives_add_plugin(MyFirstMasteringEQ
     BUNDLE_ID         "com.myaudiolab.myfirstmasteringeq"
     MANUFACTURER_CODE Myau
     PLUGIN_CODE       Mfmq
-    DESCRIPTION       "Single-band peaking EQ for mastering"
+    DESCRIPTION       "Four-band peaking EQ for mastering"
     CLAP_ID           "com.myaudiolab.myfirstmasteringeq"
     CLAP_FEATURES     audio-effect equalizer stereo
     SOURCES           ${MYEQ_SOURCES}
