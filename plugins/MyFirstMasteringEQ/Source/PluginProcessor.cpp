@@ -36,6 +36,26 @@ namespace
 
     juce::String formatDecibels (float db, int) { return juce::String (db, 2) + " dB"; }
     juce::String formatQ (float q, int)         { return juce::String (q, 2); }
+
+    // Starting points for the jobs this band does most often in mastering.
+    // Values are the real units the parameters use, so a preset cannot fall
+    // outside a range by accident.
+    struct FactoryPreset
+    {
+        const char* name;
+        float frequency;
+        float gainDb;
+        float q;
+    };
+
+    constexpr FactoryPreset factoryPresets[] = {
+        { "Flat",           1000.0f,  0.0f, 1.0f },
+        { "Low end trim",     80.0f, -2.0f, 0.7f },
+        { "Presence",       3000.0f,  1.5f, 1.0f },
+        { "Air",           12000.0f,  2.0f, 0.7f },
+    };
+
+    constexpr int numFactoryPresets = (int) (sizeof (factoryPresets) / sizeof (factoryPresets[0]));
 }
 
 //==============================================================================
@@ -354,34 +374,67 @@ double MyFirstMasteringEQAudioProcessor::getTailLengthSeconds() const
 //==============================================================================
 int MyFirstMasteringEQAudioProcessor::getNumPrograms()
 {
-    return 1;
+    return numFactoryPresets;
 }
 
 int MyFirstMasteringEQAudioProcessor::getCurrentProgram()
 {
-    return 0;
+    return currentProgram.load (std::memory_order_relaxed);
 }
 
 void MyFirstMasteringEQAudioProcessor::setCurrentProgram (int index)
 {
-    juce::ignoreUnused (index);
+    applyFactoryPreset (index);
+}
+
+void MyFirstMasteringEQAudioProcessor::applyFactoryPreset (int index)
+{
+    if (index < 0 || index >= numFactoryPresets)
+        return;
+
+    const auto& preset = factoryPresets[index];
+
+    // Notifying the host keeps its preset display and automation in step.
+    const auto apply = [this] (const char* parameterID, float realValue)
+    {
+        auto* parameter = apvts.getParameter (parameterID);
+
+        jassert (parameter != nullptr);
+
+        if (parameter != nullptr)
+            parameter->setValueNotifyingHost (parameter->convertTo0to1 (realValue));
+    };
+
+    apply (ParamIDs::frequency, preset.frequency);
+    apply (ParamIDs::gain, preset.gainDb);
+    apply (ParamIDs::q, preset.q);
+
+    currentProgram.store (index, std::memory_order_relaxed);
 }
 
 const juce::String MyFirstMasteringEQAudioProcessor::getProgramName (int index)
 {
-    juce::ignoreUnused (index);
-    return {};
+    if (index < 0 || index >= numFactoryPresets)
+        return {};
+
+    return factoryPresets[index].name;
 }
 
 void MyFirstMasteringEQAudioProcessor::changeProgramName (int index, const juce::String& newName)
 {
+    // The presets are fixed, so there is nothing to rename.
     juce::ignoreUnused (index, newName);
 }
 
 //==============================================================================
 void MyFirstMasteringEQAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    const auto state = apvts.copyState();
+    auto state = apvts.copyState();
+
+    // The parameters carry the sound; the index only restores which preset name
+    // the host and the editor show.
+    state.setProperty ("programIndex", getCurrentProgram(), nullptr);
+
     const std::unique_ptr<juce::XmlElement> xml (state.createXml());
 
     if (xml != nullptr)
@@ -397,6 +450,10 @@ void MyFirstMasteringEQAudioProcessor::setStateInformation (const void* data, in
         return;
 
     apvts.replaceState (juce::ValueTree::fromXml (*xml));
+
+    const auto index = (int) apvts.state.getProperty ("programIndex", 0);
+    currentProgram.store (juce::jlimit (0, numFactoryPresets - 1, index),
+                          std::memory_order_relaxed);
 }
 
 //==============================================================================

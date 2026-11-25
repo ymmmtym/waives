@@ -86,6 +86,22 @@ MyFirstMasteringEQAudioProcessorEditor::MyFirstMasteringEQAudioProcessorEditor (
     configureKnob (qSlider, ParamIDs::q, "Q",
                    "Sharpness of the bell. Higher Q affects a narrower band.");
 
+    for (int program = 0; program < processorRef.getNumPrograms(); ++program)
+        presetBox.addItem (processorRef.getProgramName (program), program + 1);
+
+    presetBox.setSelectedItemIndex (processorRef.getCurrentProgram(), juce::dontSendNotification);
+    presetBox.setTooltip ("Factory presets. Any knob move keeps the sound, the name stays as a hint.");
+    presetBox.setTitle ("Preset");
+    presetBox.setColour (juce::ComboBox::backgroundColourId, juce::Colours::transparentBlack);
+    presetBox.setColour (juce::ComboBox::textColourId, textPrimary);
+    presetBox.setColour (juce::ComboBox::outlineColourId, textSecondary.withAlpha (0.35f));
+    presetBox.setColour (juce::ComboBox::arrowColourId, accent);
+    presetBox.onChange = [this]
+    {
+        processorRef.applyFactoryPreset (presetBox.getSelectedItemIndex());
+    };
+    addAndMakeVisible (presetBox);
+
     bypassButton.setButtonText ("BYPASS");
     bypassButton.setColour (juce::ToggleButton::textColourId, textSecondary);
     bypassButton.setColour (juce::ToggleButton::tickColourId, accent);
@@ -137,6 +153,13 @@ void MyFirstMasteringEQAudioProcessorEditor::configureKnob (juce::Slider& slider
 void MyFirstMasteringEQAudioProcessorEditor::timerCallback()
 {
     updateInfoLabel();
+
+    // The host can change the program behind the editor's back (automation,
+    // session load), so the box follows the processor instead of only the click.
+    const auto program = processorRef.getCurrentProgram();
+
+    if (presetBox.getSelectedItemIndex() != program)
+        presetBox.setSelectedItemIndex (program, juce::dontSendNotification);
 }
 
 void MyFirstMasteringEQAudioProcessorEditor::updateInfoLabel()
@@ -179,10 +202,13 @@ void MyFirstMasteringEQAudioProcessorEditor::resized()
     titleLabel.setBounds (area.removeFromTop (30));
     area.removeFromTop (8);
 
-    auto statusRow = area.removeFromTop (24);
+    auto statusRow = area.removeFromTop (26);
     bypassButton.setBounds (statusRow.removeFromRight (92));
     statusRow.removeFromRight (8);
-    statusLabel.setBounds (statusRow);
+    presetBox.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
+
+    area.removeFromTop (4);
+    statusLabel.setBounds (area.removeFromTop (20));
 
     area.removeFromTop (8);
 

@@ -43,6 +43,7 @@ private:
     juce::Slider gainSlider;
     juce::Slider qSlider;
 
+    juce::ComboBox presetBox;
     juce::ToggleButton bypassButton;
 
     FrequencyResponseCurve curve;
