@@ -1,11 +1,12 @@
 name: build
 
-# One job per plugin per platform. Linux builds VST3 + CLAP + Standalone;
-# macOS adds AU and validates it with auval. Every job uploads a tarball.
+# CI for pull requests. Pushes to main are covered by release.yml, which builds
+# with the same reusable workflow and then publishes a GitHub Release.
+#
+# Add a plugin to matrix.plugin once it appears in WAIVES_PLUGINS in the root
+# CMakeLists.txt.
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
   workflow_dispatch:
 
@@ -14,13 +15,12 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.plugin }} / ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # A plugin row here is multiplied by every platform row. Add a plugin
-        # once it appears in WAIVES_PLUGINS in CMakeLists.txt.
+        # A plugin row is multiplied by every platform row. The platform axis
+        # has to live in the matrix itself: an include-only entry would
+        # overwrite the single base combination instead of adding one.
         plugin: [MyFirstMasteringEQ]
         platform: [linux, macos]
         include:
@@ -31,86 +31,9 @@ jobs:
             # Universal AU so it runs natively on both Apple silicon and Intel.
             extra_cmake_args: '-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"'
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config \
-            libasound2-dev libfreetype-dev libfontconfig1-dev \
-            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
-            libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
-            libgl1-mesa-dev libglu1-mesa-dev libegl-dev libcurl4-openssl-dev
-
-      - name: Cache JUCE download
-        uses: actions/cache@v4
-        with:
-          path: .cache/fetchcontent
-          # The cache holds generated CMake files with absolute paths, so the two
-          # jobs must never share an entry.
-          key: fetchcontent-${{ matrix.platform }}-juce-9.0.6-${{ hashFiles('cmake/Dependencies.cmake') }}
-
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake_args }}
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-      - name: Validate AU
-        if: runner.os == 'macOS'
-        env:
-          PLUGIN: ${{ matrix.plugin }}
-        run: |
-          set -x
-          # cmake/WaivesPlugin.cmake writes the AU codes so they are defined in
-          # one place only.
-          read -r au_type au_code au_manufacturer < "build/au_code_${PLUGIN}.txt"
-
-          component="$HOME/Library/Audio/Plug-Ins/Components/${PLUGIN}.component"
-          mkdir -p "$(dirname "$component")"
-          rm -rf "$component"
-          cp -R "build/plugins/${PLUGIN}/${PLUGIN}_artefacts/Release/AU/${PLUGIN}.component" \
-                "$(dirname "$component")/"
-
-          # arm64 macOS refuses to load unsigned code, and the audio component
-          # registry only picks the bundle up after it is restarted.
-          codesign --force --deep -s - "$component"
-          xattr -dr com.apple.quarantine "$component" || true
-          killall -9 AudioComponentRegistrar || true
-          sleep 3
-
-          auval -a 2>&1 | grep -i "$au_code" || echo "component not listed by auval -a"
-
-          for attempt in 1 2 3; do
-            if auval -v "$au_type" "$au_code" "$au_manufacturer"; then
-              exit 0
-            fi
-            echo "auval attempt $attempt failed, restarting the registrar"
-            killall -9 AudioComponentRegistrar || true
-            sleep 5
-          done
-          exit 1
-
-      # upload-artifact resets file modes to 0644, which breaks the standalone
-      # binary and the installer's -x check. A tarball keeps the permissions.
-      - name: Package plugin bundles
-        env:
-          PLUGIN: ${{ matrix.plugin }}
-        run: |
-          mkdir -p dist
-          tar -czf "dist/${PLUGIN}-${{ matrix.platform }}.tar.gz" \
-              -C "build/plugins/${PLUGIN}" "${PLUGIN}_artefacts/Release"
-
-      - name: Upload plugin bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.plugin }}-${{ matrix.platform }}
-          path: dist/${{ matrix.plugin }}-${{ matrix.platform }}.tar.gz
-          if-no-files-found: error
-          retention-days: 14
+    uses: ./.github/workflows/_build-plugin.yml
+    with:
+      plugin: ${{ matrix.plugin }}
+      platform: ${{ matrix.platform }}
+      os: ${{ matrix.os }}
+      extra_cmake_args: ${{ matrix.extra_cmake_args }}

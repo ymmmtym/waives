@@ -56,6 +56,7 @@ function(waives_add_plugin target)
         PLUGIN_CODE                  ${ARG_PLUGIN_CODE}
         PRODUCT_NAME                 "${target}"
         DESCRIPTION                  "${ARG_DESCRIPTION}"
+        VERSION                      "${PROJECT_VERSION}"
         IS_SYNTH                     FALSE
         NEEDS_MIDI_INPUT             FALSE
         NEEDS_MIDI_OUTPUT            FALSE
