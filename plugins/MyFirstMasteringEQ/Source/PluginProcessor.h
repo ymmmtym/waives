@@ -62,6 +62,9 @@ public:
     int    getCurrentBlockSize()  const noexcept { return currentBlockSize.load (std::memory_order_relaxed); }
     int    getActiveChannelCount() const noexcept { return activeChannels.load (std::memory_order_relaxed); }
 
+    /** Applies one of the factory presets (see getProgramName()). */
+    void applyFactoryPreset (int index);
+
     //==========================================================================
     juce::AudioProcessorValueTreeState& getValueTreeState() noexcept { return apvts; }
 
@@ -122,6 +125,8 @@ private:
     // Holds the input while the wet signal is faded in or out. Sized once in
     // prepareToPlay(); processBlock never allocates.
     juce::AudioBuffer<float> dryBuffer;
+
+    std::atomic<int>    currentProgram { 0 };
 
     std::atomic<double> currentSampleRate { 0.0 };
     std::atomic<int>    currentBlockSize  { 0 };

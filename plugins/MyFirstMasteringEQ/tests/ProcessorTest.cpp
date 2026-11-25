@@ -103,6 +103,9 @@ namespace
 
 int main()
 {
+    // The editor smoke test at the end needs a message manager.
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+
     constexpr double sampleRate = 48000.0;
     constexpr int    blockSize  = 512;
 
@@ -472,6 +475,66 @@ int main()
         check (maxStep < naturalStep * 1.15, "switching bypass does not step the output");
 
         setParameterValue (processor, ParamIDs::bypass, 0.0f);
+    }
+
+    //==========================================================================
+    // Factory presets: the host's program menu has to offer them, and choosing
+    // one must move the parameters.
+    {
+        check (processor.getNumPrograms() >= 3, "factory presets are published");
+
+        bool namesAreFilled = true;
+
+        for (int program = 0; program < processor.getNumPrograms(); ++program)
+            namesAreFilled = namesAreFilled && processor.getProgramName (program).isNotEmpty();
+
+        check (namesAreFilled, "every preset has a name");
+        check (processor.getProgramName (processor.getNumPrograms()).isEmpty(),
+               "an out-of-range preset name is empty");
+
+        processor.setCurrentProgram (0);
+        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain)->load()) < 1.0e-3f,
+               "the first preset is a 0 dB pass-through");
+
+        processor.setCurrentProgram (1);
+        check (processor.getCurrentProgram() == 1, "setCurrentProgram() selects the program");
+        check (std::abs (apvts.getRawParameterValue (ParamIDs::gain)->load()) > 0.1f
+                   || std::abs (apvts.getRawParameterValue (ParamIDs::frequency)->load() - 1000.0f) > 1.0f,
+               "selecting another preset changes the parameters");
+
+        processor.setCurrentProgram (processor.getNumPrograms());
+        check (processor.getCurrentProgram() == 1, "an out-of-range program is ignored");
+
+        juce::MemoryBlock presetState;
+        processor.getStateInformation (presetState);
+
+        MyFirstMasteringEQAudioProcessor presetRestored;
+        presetRestored.setStateInformation (presetState.getData(), (int) presetState.getSize());
+
+        check (presetRestored.getCurrentProgram() == 1, "state restores the selected preset");
+        check (presetRestored.getProgramName (presetRestored.getCurrentProgram())
+                   == processor.getProgramName (1),
+               "state restores the preset name");
+    }
+
+    //==========================================================================
+    // The GUI tests in pluginval are skipped in CI, so at least build the editor
+    // and run its layout once; an assert or a crash in either fails here.
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+        check (editor != nullptr, "createEditor() returns an editor");
+
+        if (editor != nullptr)
+        {
+            check (editor->getWidth() > 0 && editor->getHeight() > 0,
+                   "the editor starts with a size");
+
+            editor->setSize (400, 420);
+            editor->setSize (900, 760);
+
+            check (editor->getWidth() == 900 && editor->getHeight() == 760,
+                   "the editor follows its resize limits");
+        }
     }
 
     processor.releaseResources();
