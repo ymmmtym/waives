@@ -1,9 +1,8 @@
 #include "FrequencyResponseCurve.h"
+#include "PeakResponse.h"
 #include "PluginProcessor.h"
 
-#include <array>
 #include <cmath>
-#include <complex>
 
 namespace
 {
@@ -29,29 +28,6 @@ namespace
         return height - normalised * height;
     }
 
-    // |H(e^jw)| for coefficients { b0, b1, b2, a0, a1, a2 }.
-    float responseDb (const std::array<float, 6>& raw, double sampleRate, double probeHz)
-    {
-        const auto a0 = raw[3];
-
-        if (std::abs (a0) < 1.0e-12f)
-            return 0.0f;
-
-        const auto b0 = raw[0] / a0;
-        const auto b1 = raw[1] / a0;
-        const auto b2 = raw[2] / a0;
-        const auto a1 = raw[4] / a0;
-        const auto a2 = raw[5] / a0;
-
-        const auto omega = 2.0 * juce::MathConstants<double>::pi * probeHz / sampleRate;
-        const std::complex<double> z1 (std::cos (-omega), std::sin (-omega));
-        const auto z2 = z1 * z1;
-
-        const auto numerator   = (double) b0 + (double) b1 * z1 + (double) b2 * z2;
-        const auto denominator = 1.0 + (double) a1 * z1 + (double) a2 * z2;
-
-        return (float) juce::Decibels::gainToDecibels (std::abs (numerator / denominator), -100.0);
-    }
 }
 
 FrequencyResponseCurve::FrequencyResponseCurve (juce::AudioProcessorValueTreeState& state,
@@ -151,19 +127,11 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
     const auto& snapshot = lastSnapshot;
     const auto rate = snapshot.sampleRate > 0.0 ? snapshot.sampleRate : 48000.0;
 
-    const auto frequency = (double) snapshot.frequency;
-    const auto gainDb    = snapshot.gainDb;
-    const auto q         = snapshot.q;
+    const waives::peak::BandSettings band { snapshot.frequency, snapshot.gainDb, snapshot.q };
 
     // The centre is clamped below Nyquist, so the marker has to follow the
     // clamped value rather than the raw parameter.
-    const auto effectiveFrequency = juce::jlimit (20.0, rate * 0.45, frequency);
-
-    const auto raw = juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter (
-        rate,
-        (float) effectiveFrequency,
-        juce::jmax (0.05f, q),
-        juce::Decibels::decibelsToGain (gainDb));
+    const auto effectiveFrequency = (double) waives::peak::clampToNyquist (band, rate).frequency;
 
     juce::Path path;
     constexpr int numPoints = 240;
@@ -172,7 +140,7 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
     {
         const auto proportion = (double) i / (double) numPoints;
         const auto hz = minimumHz * std::pow (maximumHz / minimumHz, proportion);
-        const auto db = responseDb (raw, rate, hz);
+        const auto db = waives::peak::responseDb (rate, band, hz);
 
         const auto x = plot.getX() + (float) proportion * plot.getWidth();
         const auto y = plot.getY() + dbToY (juce::jlimit (-maximumDb, maximumDb, db), plot.getHeight());
@@ -198,7 +166,7 @@ void FrequencyResponseCurve::paint (juce::Graphics& g)
     // Marker at the centre frequency.
     const auto markerX = plot.getX() + frequencyToX (juce::jlimit (minimumHz, maximumHz, effectiveFrequency),
                                                     plot.getWidth());
-    const auto markerY = plot.getY() + dbToY (juce::jlimit (-maximumDb, maximumDb, gainDb),
+    const auto markerY = plot.getY() + dbToY (juce::jlimit (-maximumDb, maximumDb, band.gainDb),
                                               plot.getHeight());
 
     g.setColour (curveColour.brighter (0.6f));

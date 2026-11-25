@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "PeakResponse.h"
 
 #include <cmath>
 
@@ -70,6 +71,11 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         juce::AudioParameterFloatAttributes().withLabel ("Q")
             .withStringFromValueFunction (formatQ)));
 
+    layout.add (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { ParamIDs::bypass, 1 },
+        "Bypass",
+        false));
+
     return layout;
 }
 
@@ -82,6 +88,7 @@ MyFirstMasteringEQAudioProcessor::MyFirstMasteringEQAudioProcessor()
     frequencyParameter = apvts.getRawParameterValue (ParamIDs::frequency);
     gainParameter      = apvts.getRawParameterValue (ParamIDs::gain);
     qParameter         = apvts.getRawParameterValue (ParamIDs::q);
+    bypassParameter    = apvts.getRawParameterValue (ParamIDs::bypass);
 }
 
 MyFirstMasteringEQAudioProcessor::~MyFirstMasteringEQAudioProcessor() = default;
@@ -113,6 +120,16 @@ void MyFirstMasteringEQAudioProcessor::prepareToPlay (double sampleRate, int sam
     for (auto& filter : filters)
         filter.reset();
 
+    // 10 ms is long enough to be inaudible and short enough to feel instant.
+    constexpr double bypassFadeSeconds = 0.01;
+
+    smoothedWet.reset (sampleRate, bypassFadeSeconds);
+    smoothedWet.setCurrentAndTargetValue (bypassParameter->load() > 0.5f ? 0.0f : 1.0f);
+
+    dryBuffer.setSize (juce::jmax (1, getTotalNumOutputChannels()),
+                       juce::jmax (1, samplesPerBlock),
+                       false, true, false);
+
     updateFilterCoefficients();
 }
 
@@ -132,7 +149,7 @@ void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
 
     if (std::abs (smoothedGainDb.getCurrentValue()) < transparentThresholdDb)
     {
-        const std::array<float, 5> identity { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        const auto identity = waives::peak::identity();
 
         for (auto& filter : filters)
         {
@@ -145,19 +162,14 @@ void MyFirstMasteringEQAudioProcessor::updateFilterCoefficients() noexcept
         return;
     }
 
-    const auto frequency = juce::jlimit (20.0f, (float) (sampleRate * 0.45),
-                                         smoothedFrequency.getCurrentValue());
-    const auto q = juce::jmax (0.05f, smoothedQ.getCurrentValue());
-    const auto gain = juce::Decibels::decibelsToGain (smoothedGainDb.getCurrentValue());
+    const waives::peak::BandSettings band { smoothedFrequency.getCurrentValue(),
+                                            smoothedGainDb.getCurrentValue(),
+                                            smoothedQ.getCurrentValue() };
 
-    // ArrayCoefficients returns { b0, b1, b2, a0, a1, a2 } by value, so this
-    // never allocates and is safe to call from the audio thread.
-    const auto raw = juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter (sampleRate,
-                                                                              frequency, q, gain);
-    const auto a0 = raw[3];
-
-    const std::array<float, 5> normalised { raw[0] / a0, raw[1] / a0, raw[2] / a0,
-                                            raw[4] / a0, raw[5] / a0 };
+    // Everything returns by value, so this never allocates and is safe to call
+    // from the audio thread.
+    const auto normalised = waives::peak::normalise (
+        waives::peak::makePeakCoefficients (sampleRate, band));
 
     for (auto& filter : filters)
         filter.setCoefficients (normalised);
@@ -195,26 +207,84 @@ void MyFirstMasteringEQAudioProcessor::processBlock (juce::AudioBuffer<float>& b
     for (int channel = getTotalNumInputChannels(); channel < numOutputChannels; ++channel)
         buffer.clear (channel, 0, numSamples);
 
-    // 3) One independent biquad per channel; the state must not be shared.
     const int channelsToProcess = juce::jmin (numOutputChannels, (int) filters.size());
 
-    const auto processRange = [this, &buffer, channelsToProcess] (int start, int length)
-    {
-        for (int channel = 0; channel < channelsToProcess; ++channel)
-        {
-            auto* samples = buffer.getWritePointer (channel) + start;
-            auto& filter = filters[(size_t) channel];
-
-            for (int i = 0; i < length; ++i)
-                samples[i] = filter.processSample (samples[i]);
-        }
-    };
-
-    // 4) Retune only while a parameter is moving. A steady knob costs one
-    //    isSmoothing() check per block.
+    // 3) Retuning happens inside processWet(), which only recomputes while a
+    //    parameter is moving.
     smoothedFrequency.setTargetValue (frequencyParameter->load());
     smoothedGainDb.setTargetValue (gainParameter->load());
     smoothedQ.setTargetValue (qParameter->load());
+    smoothedWet.setTargetValue (bypassParameter->load() > 0.5f ? 0.0f : 1.0f);
+
+    // 4) The host may pass a block longer than the one announced in
+    //    prepareToPlay(), so the dry copy is filled in chunks of its own size
+    //    rather than reallocating on the audio thread.
+    const int chunkSize = juce::jmax (1, dryBuffer.getNumSamples());
+
+    for (int start = 0; start < numSamples; start += chunkSize)
+    {
+        const int length = juce::jmin (chunkSize, numSamples - start);
+        processChunk (buffer, start, length, channelsToProcess);
+    }
+
+    activeChannels.store (numOutputChannels, std::memory_order_relaxed);
+}
+
+void MyFirstMasteringEQAudioProcessor::processChunk (juce::AudioBuffer<float>& buffer,
+                                                     int start,
+                                                     int length,
+                                                     int channelsToProcess)
+{
+    // Dry audio is only needed while the wet signal is being faded in or out: a
+    // fully processed block works in place, and a fully bypassed block is left
+    // untouched. The filter still runs while bypassed so that its state tracks
+    // the input and the fade-in starts from a settled filter.
+    const bool needsDry = smoothedWet.isSmoothing() || smoothedWet.getCurrentValue() < 1.0f;
+
+    if (needsDry)
+    {
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+            dryBuffer.copyFrom (channel, 0, buffer, channel, start, length);
+    }
+
+    processWet (buffer, start, length, channelsToProcess);
+
+    if (! needsDry)
+        return;
+
+    // One ramp step per sample, applied to every channel, so the fade lands on
+    // the same point in all of them.
+    for (int i = 0; i < length; ++i)
+    {
+        const auto wetAmount = smoothedWet.getNextValue();
+
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+        {
+            auto* samples = buffer.getWritePointer (channel) + start;
+            const auto dry = dryBuffer.getSample (channel, i);
+
+            samples[i] = dry + (samples[i] - dry) * wetAmount;
+        }
+    }
+}
+
+void MyFirstMasteringEQAudioProcessor::processWet (juce::AudioBuffer<float>& buffer,
+                                                   int start,
+                                                   int length,
+                                                   int channelsToProcess)
+{
+    // One independent biquad per channel; the state must not be shared.
+    const auto processRange = [this, &buffer, channelsToProcess] (int rangeStart, int rangeLength)
+    {
+        for (int channel = 0; channel < channelsToProcess; ++channel)
+        {
+            auto* samples = buffer.getWritePointer (channel) + rangeStart;
+            auto& filter = filters[(size_t) channel];
+
+            for (int i = 0; i < rangeLength; ++i)
+                samples[i] = filter.processSample (samples[i]);
+        }
+    };
 
     const bool isSmoothing = smoothedFrequency.isSmoothing()
                           || smoothedGainDb.isSmoothing()
@@ -222,29 +292,26 @@ void MyFirstMasteringEQAudioProcessor::processBlock (juce::AudioBuffer<float>& b
 
     if (! isSmoothing)
     {
-        processRange (0, numSamples);
+        processRange (start, length);
+        return;
     }
-    else
+
+    // Advance the ramp in bounded steps instead of once per host block: a block
+    // longer than the ramp would otherwise jump straight to the target and the
+    // smoothing would never be heard.
+    constexpr int maximumRetuneInterval = 32;
+
+    for (int offset = 0; offset < length; offset += maximumRetuneInterval)
     {
-        // Advance the ramp in bounded steps instead of once per host block: a
-        // block longer than the ramp would otherwise jump straight to the target
-        // and the smoothing would never be heard.
-        constexpr int maximumRetuneInterval = 32;
+        const int step = juce::jmin (maximumRetuneInterval, length - offset);
 
-        for (int start = 0; start < numSamples; start += maximumRetuneInterval)
-        {
-            const int length = juce::jmin (maximumRetuneInterval, numSamples - start);
+        smoothedFrequency.skip (step);
+        smoothedGainDb.skip (step);
+        smoothedQ.skip (step);
+        updateFilterCoefficients();
 
-            smoothedFrequency.skip (length);
-            smoothedGainDb.skip (length);
-            smoothedQ.skip (length);
-            updateFilterCoefficients();
-
-            processRange (start, length);
-        }
+        processRange (start + offset, step);
     }
-
-    activeChannels.store (numOutputChannels, std::memory_order_relaxed);
 }
 
 //==============================================================================

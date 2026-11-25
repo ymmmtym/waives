@@ -13,6 +13,9 @@ namespace ParamIDs
     inline constexpr const char* frequency = "freq";
     inline constexpr const char* gain      = "gain";
     inline constexpr const char* q         = "q";
+    // Added after the first release, so it goes last: hosts match automation by
+    // parameter index within the same version hint.
+    inline constexpr const char* bypass    = "bypass";
 }
 
 class MyFirstMasteringEQAudioProcessor final : public juce::AudioProcessor
@@ -93,6 +96,8 @@ private:
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void updateFilterCoefficients() noexcept;
+    void processChunk (juce::AudioBuffer<float>& buffer, int start, int length, int channelsToProcess);
+    void processWet (juce::AudioBuffer<float>& buffer, int start, int length, int channelsToProcess);
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -100,6 +105,7 @@ private:
     std::atomic<float>* frequencyParameter = nullptr;
     std::atomic<float>* gainParameter = nullptr;
     std::atomic<float>* qParameter = nullptr;
+    std::atomic<float>* bypassParameter = nullptr;
 
     std::array<Biquad, 2> filters;
 
@@ -108,6 +114,14 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedFrequency;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedGainDb;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedQ;
+
+    // 1 = fully processed, 0 = fully bypassed. Fading between the two instead of
+    // switching keeps a bypass click out of the master bus.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedWet;
+
+    // Holds the input while the wet signal is faded in or out. Sized once in
+    // prepareToPlay(); processBlock never allocates.
+    juce::AudioBuffer<float> dryBuffer;
 
     std::atomic<double> currentSampleRate { 0.0 };
     std::atomic<int>    currentBlockSize  { 0 };
