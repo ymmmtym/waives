@@ -85,7 +85,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: tools
-          key: validators-${{ inputs.platform }}-pluginval-1.0.4-clap-validator-0.4.1
+          key: validators-v2-${{ inputs.platform }}-pluginval-1.0.4-clap-validator-0.4.1
 
       - name: Download validators
         env:
@@ -95,26 +95,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p tools
+          mkdir -p tools/bin
 
-          if [ ! -x tools/pluginval ]; then
+          if [ ! -x tools/bin/pluginval ]; then
             gh release download v1.0.4 --repo Tracktion/pluginval \
               --pattern "${PLUGINVAL_ASSET}" --dir tools --clobber
             unzip -o -q "tools/${PLUGINVAL_ASSET}" -d tools
             rm -f "tools/${PLUGINVAL_ASSET}"
+
+            # Linux ships a bare binary, macOS a .app bundle whose resources must
+            # stay next to it. A symlink hides the difference from the steps.
+            ln -sf "$PWD/$(find tools -name pluginval -type f | head -n 1)" tools/bin/pluginval
           fi
 
-          if [ ! -x tools/clap-validator ]; then
+          if [ ! -x tools/bin/clap-validator ]; then
             gh release download 0.4.1 --repo free-audio/clap-validator \
               --pattern "${CLAP_VALIDATOR_PATTERN}" --dir tools --clobber
             unzip -o -q tools/clap-validator-*.zip -d tools
             tar -xzf tools/clap-validator-*.tar.gz -C tools
             rm -f tools/clap-validator-*.zip tools/clap-validator-*.tar.gz
+
+            # The tarball layout differs per platform (binaries/ on macOS).
+            mv "$(find tools -name clap-validator -type f | head -n 1)" tools/bin/clap-validator
           fi
 
-          chmod +x tools/pluginval tools/clap-validator
-          tools/pluginval --version
-          tools/clap-validator --version
+          chmod +x tools/bin/pluginval tools/bin/clap-validator
+          tools/bin/pluginval --version
+          tools/bin/clap-validator --version
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ inputs.extra_cmake_args }}
@@ -132,7 +139,7 @@ jobs:
           set -euo pipefail
           bundle="build/plugins/${PLUGIN}/${PLUGIN}_artefacts/Release/VST3/${PLUGIN}.vst3"
           # --skip-gui-tests keeps this headless: no display on the Linux runner.
-          tools/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process "$bundle"
+          tools/bin/pluginval --strictness-level 5 --skip-gui-tests --validate-in-process "$bundle"
 
       - name: Validate CLAP (clap-validator)
         env:
@@ -144,7 +151,7 @@ jobs:
           # tee keeps the report in the log; with pipefail the validator's exit
           # code decides the step (it is non-zero when a test fails). Its summary
           # line is ANSI coloured, so it is not parsed.
-          tools/clap-validator validate "$bundle" | tee clap-validator.log
+          tools/bin/clap-validator validate "$bundle" | tee clap-validator.log
 
       - name: Validate AU
         if: runner.os == 'macOS'
