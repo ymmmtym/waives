@@ -127,3 +127,44 @@ function(waives_add_plugin_tests target)
 
     add_test(NAME ${target} COMMAND ${target})
 endfunction()
+
+# waives_add_plugin_benchmark(<target>
+#     BENCHMARK_SOURCE <file>
+#     SOURCES <plugin source>...
+#     INCLUDE_DIRS <dir>...
+#     [LINK_LIBRARIES <lib>...])
+#
+# Builds a console executable that reports processing cost. Deliberately not
+# registered with ctest: the numbers depend on the machine, so they are recorded
+# in the README instead of being asserted.
+function(waives_add_plugin_benchmark target)
+    if(NOT WAIVES_BUILD_BENCHMARKS)
+        return()
+    endif()
+
+    cmake_parse_arguments(PARSE_ARGV 1 ARG
+        "" "BENCHMARK_SOURCE" "SOURCES;INCLUDE_DIRS;LINK_LIBRARIES")
+
+    if(NOT ARG_BENCHMARK_SOURCE)
+        message(FATAL_ERROR "waives_add_plugin_benchmark(${target}): BENCHMARK_SOURCE is required")
+    endif()
+
+    juce_add_console_app(${target} PRODUCT_NAME "${target}")
+
+    target_sources(${target} PRIVATE ${ARG_BENCHMARK_SOURCE} ${ARG_SOURCES})
+
+    target_include_directories(${target} PRIVATE
+        ${ARG_INCLUDE_DIRS}
+        "${PROJECT_SOURCE_DIR}/tests")
+
+    target_compile_definitions(${target} PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPOINTER=1)
+
+    target_link_libraries(${target}
+        PRIVATE ${ARG_LINK_LIBRARIES}
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+endfunction()
