@@ -70,15 +70,21 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         return band == 0 ? juce::String() : " " + juce::String (band + 1);
     };
 
-    // The version hint (1) must stay stable per parameter ID: VST3/AU hosts use
-    // it to match automation data across sessions.
+    // The AU wrapper sorts parameters by version hint and then by identifier
+    // hash, and hosts address automation by that position. Band 1 keeps hint 1
+    // with the bypass switch; the bands added later use hint 2 so they sort
+    // after everything v0.1.0 published and no existing automation index moves.
+    constexpr int legacyVersionHint = 1;
+    constexpr int newBandVersionHint = 2;
+
     for (int band = 0; band < ParamIDs::numBands; ++band)
     {
         const auto index = (size_t) band;
         const auto suffix = suffixFor (band);
+        const int versionHint = band == 0 ? legacyVersionHint : newBandVersionHint;
 
         layout.add (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID { ParamIDs::frequency[index], 1 },
+            juce::ParameterID { ParamIDs::frequency[index], versionHint },
             "Frequency" + suffix,
             makeLogRange (20.0f, 20000.0f, 1000.0f),
             1000.0f,
@@ -87,7 +93,7 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
                 .withValueFromStringFunction (parseFrequency)));
 
         layout.add (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID { ParamIDs::gain[index], 1 },
+            juce::ParameterID { ParamIDs::gain[index], versionHint },
             "Gain" + suffix,
             juce::NormalisableRange<float> { -18.0f, 18.0f, 0.01f },
             0.0f,
@@ -95,7 +101,7 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
                 .withStringFromValueFunction (formatDecibels)));
 
         layout.add (std::make_unique<juce::AudioParameterFloat> (
-            juce::ParameterID { ParamIDs::q[index], 1 },
+            juce::ParameterID { ParamIDs::q[index], versionHint },
             "Q" + suffix,
             makeLogRange (0.1f, 10.0f, 1.0f),
             1.0f,
@@ -104,7 +110,7 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
     }
 
     layout.add (std::make_unique<juce::AudioParameterBool> (
-        juce::ParameterID { ParamIDs::bypass, 1 },
+        juce::ParameterID { ParamIDs::bypass, legacyVersionHint },
         "Bypass",
         false));
 

@@ -5,6 +5,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -26,6 +27,19 @@ namespace
     };
 
     constexpr double secondsOfAudio = 10.0;
+
+    // The two configurations the README reports: one bell, and all four bands
+    // doing work.
+    struct Scenario
+    {
+        const char* name;
+        std::array<float, 4> gainDb;
+    };
+
+    constexpr Scenario scenarios[] = {
+        { "1 band",  {  6.0f,  0.0f, 0.0f,  0.0f } },
+        { "4 bands", {  6.0f, -4.0f, 3.0f,  2.0f } },
+    };
 
     // Processes `secondsOfAudio` through the real processor and returns the wall
     // time in milliseconds.
@@ -75,33 +89,45 @@ int main()
 
     MyFirstMasteringEQAudioProcessor processor;
 
-    // A +6 dB bell: a boost exercises the filter the way a real session does.
     const auto setParameter = [&processor] (const char* parameterID, float realValue)
     {
         auto* parameter = processor.getValueTreeState().getParameter (parameterID);
         parameter->setValueNotifyingHost (parameter->convertTo0to1 (realValue));
     };
 
-    setParameter (ParamIDs::frequency[0], 1000.0f);
-    setParameter (ParamIDs::gain[0], 6.0f);
-    setParameter (ParamIDs::q[0], 1.0f);
+    // Spread the bands across the spectrum so each one filters a different
+    // region, the way a mastering session uses them.
+    constexpr std::array<float, 4> centreHz { 100.0f, 500.0f, 2000.0f, 8000.0f };
+    constexpr std::array<float, 4> bandQ    { 0.7f, 1.0f, 1.4f, 0.7f };
 
-    std::printf ("%9s %7s %12s %12s %12s %13s\n",
-                 "rate", "block", "audio (s)", "wall (ms)", "realtime", "cpu (1 core)");
-
-    for (const auto& config : configs)
+    for (int band = 0; band < 4; ++band)
     {
-        const auto wallMilliseconds = measure (processor, config);
-        const auto realtimeFactor = secondsOfAudio * 1000.0 / juce::jmax (1.0e-9, wallMilliseconds);
-        const auto cpuPercent = 100.0 / realtimeFactor;
+        setParameter (ParamIDs::frequency[(size_t) band], centreHz[(size_t) band]);
+        setParameter (ParamIDs::q[(size_t) band], bandQ[(size_t) band]);
+    }
 
-        std::printf ("%9.0f %7d %12.1f %12.2f %11.1fx %12.3f%%\n",
-                     config.sampleRate, config.blockSize, secondsOfAudio,
-                     wallMilliseconds, realtimeFactor, cpuPercent);
+    std::printf ("%8s %9s %7s %12s %12s %12s %13s\n",
+                 "scenario", "rate", "block", "audio (s)", "wall (ms)", "realtime", "cpu (1 core)");
+
+    for (const auto& scenario : scenarios)
+    {
+        for (int band = 0; band < 4; ++band)
+            setParameter (ParamIDs::gain[(size_t) band], scenario.gainDb[(size_t) band]);
+
+        for (const auto& config : configs)
+        {
+            const auto wallMilliseconds = measure (processor, config);
+            const auto realtimeFactor = secondsOfAudio * 1000.0 / juce::jmax (1.0e-9, wallMilliseconds);
+            const auto cpuPercent = 100.0 / realtimeFactor;
+
+            std::printf ("%8s %9.0f %7d %12.1f %12.2f %11.1fx %12.3f%%\n",
+                         scenario.name, config.sampleRate, config.blockSize, secondsOfAudio,
+                         wallMilliseconds, realtimeFactor, cpuPercent);
+        }
     }
 
     std::printf ("\nlatency: %d samples\n", processor.getLatencySamples());
-    std::printf ("stereo in/out, 1 kHz sine, +6 dB bell at 1 kHz, Q 1\n");
+    std::printf ("stereo in/out, 1 kHz sine; bands at 100 / 500 / 2000 / 8000 Hz\n");
 
     return 0;
 }

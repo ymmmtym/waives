@@ -593,12 +593,17 @@ int main()
                                              ParamIDs::gain[index],
                                              ParamIDs::q[index] })
             {
-                auto child = legacyState.getChildWithName (parameterID);
+                // APVTS children are PARAM nodes; the parameter ID is a property.
+                auto child = legacyState.getChildWithProperty ("id", parameterID);
 
                 if (child.isValid())
                     legacyState.removeChild (child, nullptr);
             }
         }
+
+        // freq, gain, q and bypass are all a v0.1.0 session could hold.
+        check (legacyState.getNumChildren() == 4,
+               "the legacy fixture only carries the four v0.1.0 parameters");
 
         juce::MemoryBlock legacyBlock;
         juce::AudioProcessor::copyXmlToBinary (*legacyState.createXml(), legacyBlock);
