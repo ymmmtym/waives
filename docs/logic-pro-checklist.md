@@ -24,7 +24,7 @@ for p in ~/Library/Audio/Plug-Ins/Components/MyFirstMasteringEQ.component \
         # 途中で失敗した .bak を残さない。失敗したら検証そのものを中止する
         rm -rf "$p.bak" || { echo "cannot clear $p.bak" >&2; exit 1; }
         if ! cp -R "$p" "$p.bak"; then
-            rm -rf "$p.bak"
+            rm -rf "$p.bak" || echo "warning: delete $p.bak by hand" >&2
             echo "backup failed: $p" >&2
             exit 1
         fi
