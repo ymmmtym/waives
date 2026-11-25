@@ -43,7 +43,8 @@ plugins/<PluginName>/
 ## すぐ使う（ビルド不要）
 
 [Releases](https://github.com/ymmmtym/waives/releases) にビルド済みのバンドルがある。
-main にマージするたびに自動で作られる。
+main にマージするたびに自動で作られ、タグは `v<バージョン>-<短い SHA>`（例 `v0.1.0-1899315`）。
+バージョンはリポジトリ直下の `VERSION` で決まる。
 
 | ファイル | 中身 |
 |----------|------|
@@ -51,9 +52,15 @@ main にマージするたびに自動で作られる。
 | `MyFirstMasteringEQ-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
 | `SHA256SUMS` | 上記のチェックサム |
 
+展開すると `MyFirstMasteringEQ_artefacts/Release/` と `THIRD-PARTY-NOTICES.md` が出てくる。
+
+### Linux
+
 ```bash
 tar -xzf MyFirstMasteringEQ-linux.tar.gz
-sha256sum -c SHA256SUMS        # 検証（同じディレクトリで実行）
+
+# 片方のアーカイブだけ落とした場合は --ignore-missing を付ける
+sha256sum -c --ignore-missing SHA256SUMS
 
 mkdir -p ~/.vst3 ~/.clap ~/.local/bin
 cp -R MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 ~/.vst3/
@@ -62,9 +69,33 @@ install -Dm755 MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringE
     ~/.local/bin/MyFirstMasteringEQ
 ```
 
-macOS は `AU/` を `~/Library/Audio/Plug-Ins/Components/`、`VST3/` を
-`~/Library/Audio/Plug-Ins/VST3/` に置く。配布物はアドホック署名なので、
-Gatekeeper の隔離属性を外す必要がある（§7 を参照）。
+### macOS
+
+macOS には `sha256sum` が無いので `shasum` を使う。
+
+```bash
+tar -xzf MyFirstMasteringEQ-macos.tar.gz
+
+# 両方落とした場合
+shasum -a 256 -c SHA256SUMS
+# macOS のアーカイブだけ落とした場合
+grep macos SHA256SUMS | shasum -a 256 -c -
+
+mkdir -p ~/Library/Audio/Plug-Ins/{Components,VST3,CLAP}
+
+# バンドル本体をコピーする（AU/ や VST3/ のディレクトリごとではない）
+cp -R MyFirstMasteringEQ_artefacts/Release/AU/MyFirstMasteringEQ.component \
+      ~/Library/Audio/Plug-Ins/Components/
+cp -R MyFirstMasteringEQ_artefacts/Release/VST3/MyFirstMasteringEQ.vst3 \
+      ~/Library/Audio/Plug-Ins/VST3/
+cp -R MyFirstMasteringEQ_artefacts/Release/CLAP/MyFirstMasteringEQ.clap \
+      ~/Library/Audio/Plug-Ins/CLAP/
+
+# スタンドアローンは .app。そのまま起動するか /Applications へ移す
+open MyFirstMasteringEQ_artefacts/Release/Standalone/MyFirstMasteringEQ.app
+```
+
+配布物はアドホック署名なので、Gatekeeper の隔離属性を外す必要がある（§7 を参照）。
 
 自分でビルドする場合は §1 以降に進む。
 
@@ -418,8 +449,9 @@ ctest --test-dir build --output-on-failure
 
 ### 使う側の義務
 
-- バイナリを配布するときは、対応するソースを提供する（本リポジトリが該当）
-- 改変版を配布するときは、同じ AGPL-3.0 で公開する
+- 改変していないバイナリを配布するときは、対応するソースを提供する（本リポジトリが該当）
+- 改変版（バイナリを含む）を配布するときは、改変を含む対応するソースを提供し、
+  同じ AGPL-3.0 で公開する
 
 プラグインを DAW で使うだけなら、これらの義務は発生しない。
 
