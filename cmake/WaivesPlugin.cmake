@@ -68,6 +68,9 @@ function(waives_add_plugin target)
     target_sources(${target} PRIVATE ${ARG_SOURCES})
     target_compile_definitions(${target} PUBLIC ${WAIVES_PLUGIN_DEFINITIONS})
 
+    # Filter and noise helpers shared by every plugin (shared/WaivesDsp.h).
+    target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/shared")
+
     target_link_libraries(${target}
         PRIVATE ${ARG_LINK_LIBRARIES}
         PUBLIC
@@ -112,7 +115,8 @@ function(waives_add_plugin_tests target)
 
     target_include_directories(${target} PRIVATE
         ${ARG_INCLUDE_DIRS}
-        "${PROJECT_SOURCE_DIR}/tests")
+        "${PROJECT_SOURCE_DIR}/tests"
+        "${PROJECT_SOURCE_DIR}/shared")
 
     target_compile_definitions(${target} PRIVATE
         JUCE_WEB_BROWSER=0
@@ -155,7 +159,8 @@ function(waives_add_plugin_benchmark target)
 
     target_include_directories(${target} PRIVATE
         ${ARG_INCLUDE_DIRS}
-        "${PROJECT_SOURCE_DIR}/tests")
+        "${PROJECT_SOURCE_DIR}/tests"
+        "${PROJECT_SOURCE_DIR}/shared")
 
     target_compile_definitions(${target} PRIVATE
         JUCE_WEB_BROWSER=0
