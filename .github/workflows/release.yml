@@ -29,6 +29,7 @@ jobs:
         plugin:
           - MyFirstMasteringEQ
           - MyFirstTapeMachine
+          - MyFirstTubeAmp
         platform: [linux, macos]
         include:
           - platform: linux
