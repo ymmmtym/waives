@@ -26,7 +26,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        plugin: [MyFirstMasteringEQ]
+        plugin:
+          - MyFirstMasteringEQ
+          - MyFirstTapeMachine
         platform: [linux, macos]
         include:
           - platform: linux

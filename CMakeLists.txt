@@ -48,7 +48,8 @@ enable_testing()
 # One directory per plugin under plugins/. Only the plugins listed here are
 # configured; add the directory name to build a new plugin.
 set(WAIVES_PLUGINS
-    MyFirstMasteringEQ)
+    MyFirstMasteringEQ
+    MyFirstTapeMachine)
 
 foreach(plugin IN LISTS WAIVES_PLUGINS)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/plugins/${plugin}/CMakeLists.txt")

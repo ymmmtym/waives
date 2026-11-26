@@ -21,7 +21,9 @@ jobs:
         # A plugin row is multiplied by every platform row. The platform axis
         # has to live in the matrix itself: an include-only entry would
         # overwrite the single base combination instead of adding one.
-        plugin: [MyFirstMasteringEQ]
+        plugin:
+          - MyFirstMasteringEQ
+          - MyFirstTapeMachine
         platform: [linux, macos]
         include:
           - platform: linux
