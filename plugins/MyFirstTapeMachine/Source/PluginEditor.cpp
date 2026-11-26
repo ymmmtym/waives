@@ -199,7 +199,7 @@ void MyFirstTapeMachineAudioProcessorEditor::updateInfoLabel()
     if (sampleRate <= 0.0)
     {
         infoLabel.setText ("waiting for audio device", juce::dontSendNotification);
-        statusLabel.setText ("TAPE  ·  15 ips", juce::dontSendNotification);
+        statusLabel.setText ("TAPE - 15 ips", juce::dontSendNotification);
         return;
     }
 
@@ -213,8 +213,8 @@ void MyFirstTapeMachineAudioProcessorEditor::updateInfoLabel()
     const auto wow = apvts.getRawParameterValue (ParamIDs::wow)->load();
     const auto flutter = apvts.getRawParameterValue (ParamIDs::flutter)->load();
 
-    statusLabel.setText ("TAPE  ·  wow " + juce::String (wow, 0) + " %"
-                             + "  ·  flutter " + juce::String (flutter, 0) + " %",
+    statusLabel.setText ("TAPE - wow " + juce::String (wow, 0) + " %, flutter "
+                             + juce::String (flutter, 0) + " %",
                          juce::dontSendNotification);
 }
 
@@ -327,6 +327,8 @@ void MyFirstTapeMachineAudioProcessorEditor::resized()
     bypassButton.setBounds (statusRow.removeFromRight (92));
     statusRow.removeFromRight (8);
     presetBox.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
+    statusRow.removeFromLeft (10);
+    statusLabel.setBounds (statusRow);
 
     area.removeFromTop (10);
 
