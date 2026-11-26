@@ -365,6 +365,11 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
             updateCoefficients();
         }
 
+        const auto sampleRate = getCurrentSampleRate();
+        const auto wowPhaseIncrement = wowRateHz / sampleRate;
+        const auto flutterPhaseIncrement = flutterRateHz / sampleRate;
+        const auto flutterFastPhaseIncrement = flutterFastRateHz / sampleRate;
+
         // Pass 1: into the delay line, out with the wow/flutter modulation, plus
         // the aligned dry tap the mix knob crossfades with.
         for (int i = 0; i < step; ++i)
@@ -376,9 +381,9 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                                   + flutterDepth * (float) (0.7 * std::sin (twoPi * flutterPhase)
                                                             + 0.3 * std::sin (twoPi * flutterPhaseFast));
 
-            wowPhase += wowRateHz / currentSampleRate.load (std::memory_order_relaxed);
-            flutterPhase += flutterRateHz / currentSampleRate.load (std::memory_order_relaxed);
-            flutterPhaseFast += flutterFastRateHz / currentSampleRate.load (std::memory_order_relaxed);
+            wowPhase += wowPhaseIncrement;
+            flutterPhase += flutterPhaseIncrement;
+            flutterPhaseFast += flutterFastPhaseIncrement;
 
             wowPhase -= std::floor (wowPhase);
             flutterPhase -= std::floor (flutterPhase);
@@ -414,6 +419,7 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
             // -6 dBFS sine by about 6 dB. The bias grows with drive as well, so
             // the even harmonics arrive with the crunch instead of at rest.
             const auto drive = smoothedDrive.getCurrentValue() * 0.1f;
+            smoothedDrive.skip (step);
             const auto curveAmount = 0.05f + 3.95f * drive;
             const auto bias = saturationBias * drive;
 
@@ -429,11 +435,15 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
         }
 
         // Pass 3: playback EQ, tone, DC block, hiss, mix and the output trim.
+
+        // A uniform generator between -1 and 1 has an RMS of 1/sqrt(3), so the
+        // hiss parameter can mean an RMS level.
+        const auto hissGain = juce::Decibels::decibelsToGain (hissParameter->load()) * 1.7320508f;
+
         for (int i = 0; i < step; ++i)
         {
             const auto mix = smoothedMix.getNextValue();
             const auto outputGain = smoothedOutputGain.getNextValue();
-            const auto hissGain = juce::Decibels::decibelsToGain (hissParameter->load()) * 1.7320508f;
 
             for (int channel = 0; channel < channelsToProcess; ++channel)
             {

@@ -466,6 +466,53 @@ int main()
     }
 
     //==========================================================================
+    // A knob move has to reach the sound without a prepareToPlay() in between:
+    // a host only calls that on sample-rate or buffer changes.
+    {
+        makeDeterministic (processor);
+        setParameterValue (processor, ParamIDs::tone, 18000.0f);
+        setParameterValue (processor, ParamIDs::wow, 0.0f);
+        setParameterValue (processor, ParamIDs::flutter, 0.0f);
+        setParameterValue (processor, ParamIDs::drive, 0.0f);
+
+        const auto clean = render (processor, sampleRate, 1000.0);
+
+        // Same instance, no fresh prepare: this is what turning a knob does.
+        setParameterValue (processor, ParamIDs::drive, 10.0f);
+
+        juce::AudioBuffer<float> driven = makeSine (sampleRate, 1000.0, 1.0);
+
+        processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
+        processAll (processor, driven, blockSize);
+
+        const auto drivenDistortion = distortionPercent (driven, 1000.0, sampleRate);
+
+        check (drivenDistortion > clean.distortion * 5.0,
+               "a drive move reaches the sound without a fresh prepare");
+
+        // Tone is retuned from a smoothed ramp rather than per sample; the same
+        // applies to it.
+        setParameterValue (processor, ParamIDs::drive, 0.0f);
+        setParameterValue (processor, ParamIDs::tone, 18000.0f);
+
+        juce::AudioBuffer<float> open = makeSine (sampleRate, 8000.0, 1.0);
+        processAll (processor, open, blockSize);
+        const auto openLevel = rmsDb (open, 0, (int) (sampleRate * 0.3), (int) (sampleRate * 0.6));
+
+        setParameterValue (processor, ParamIDs::tone, 2500.0f);
+
+        juce::AudioBuffer<float> closed = makeSine (sampleRate, 8000.0, 1.0);
+        processAll (processor, closed, blockSize);
+        const auto closedLevel = rmsDb (closed, 0, (int) (sampleRate * 0.3), (int) (sampleRate * 0.6));
+
+        check (closedLevel < openLevel - 6.0,
+               "a tone move reaches the sound without a fresh prepare");
+
+        processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+    }
+
+    //==========================================================================
     // Smoothing: a knob jump inside a long block still ramps.
     {
         makeDeterministic (processor);
