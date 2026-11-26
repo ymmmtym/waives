@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 
@@ -134,6 +135,19 @@ namespace waives::dsp
         float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
         float z1 = 0.0f, z2 = 0.0f;
     };
+
+    // Merge a new peak into the value the editor's timer reads. The audio
+    // thread must not write back a stale maximum after the timer cleared it, so
+    // the compare and exchange restarts from whatever is in there now.
+    inline void updatePeak (std::atomic<float>& target, float value) noexcept
+    {
+        auto previous = target.load (std::memory_order_relaxed);
+
+        while (previous < value
+               && ! target.compare_exchange_weak (previous, value, std::memory_order_relaxed))
+        {
+        }
+    }
 
     // Deterministic white noise: a xorshift instead of juce::Random keeps the
     // generator per channel and free of any shared state.

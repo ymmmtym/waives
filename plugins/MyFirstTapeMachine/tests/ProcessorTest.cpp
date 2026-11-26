@@ -138,7 +138,7 @@ namespace
         processor.prepareToPlay (sampleRate, blockSize);
 
         auto buffer = makeSine (sampleRate, frequency, 1.0);
-        buffer.applyGain ((float) (inputLevel / 0.5));   // fillWithSine writes at 0.5
+        buffer.applyGain ((float) inputLevel);
 
         processAll (processor, buffer, blockSize);
 
@@ -161,26 +161,42 @@ namespace
         return result;
     }
 
-    void runPassThroughCheck (MyFirstTapeMachineAudioProcessor& processor,
-                              double sampleRate, int numChannels, int blockSize,
-                              const char* what)
+    // Bypassed, the plugin has to hand the input back unprocessed but still
+    // delayed by the latency it reports: the host compensates for that delay, so
+    // a bypassed signal that arrives early would slide against the dry tracks.
+    void runBypassCheck (MyFirstTapeMachineAudioProcessor& processor,
+                         double sampleRate, int numChannels, int blockSize,
+                         const char* what, bool hostBypass = false)
     {
-        setParameterValue (processor, ParamIDs::bypass, 1.0f);
+        if (! hostBypass)
+            setParameterValue (processor, ParamIDs::bypass, 1.0f);
 
         processor.setPlayConfigDetails (numChannels, numChannels, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
 
-        juce::AudioBuffer<float> buffer (numChannels, blockSize);
-        fillWithSine (buffer);
+        const auto latency = processor.getReportedLatency();
+        const int numSamples = 8192;
 
-        const juce::AudioBuffer<float> reference (buffer);
-        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> input (numChannels, numSamples);
+        fillWithSine (input);
 
-        // Twice: a bypassed plugin must not accumulate state either.
-        processor.processBlock (buffer, midi);
-        processor.processBlock (buffer, midi);
+        juce::AudioBuffer<float> output (input);
 
-        check (buffersMatch (buffer, reference, 0.0f), what);
+        // Once to settle the bypass fade and fill the delay line, then again on
+        // a fresh copy for the comparison.
+        processAll (processor, output, blockSize);
+
+        output.makeCopyOf (input);
+        processAll (processor, output, blockSize);
+
+        bool matches = latency > 0;
+
+        for (int channel = 0; channel < numChannels; ++channel)
+            for (int i = latency; i < numSamples; ++i)
+                matches = matches && std::abs (output.getSample (channel, i)
+                                               - input.getSample (channel, i - latency)) < 1.0e-6f;
+
+        check (matches, what);
     }
 }
 
@@ -222,10 +238,15 @@ int main()
 
     // Hosts are free to call processBlock with any block size, including tiny
     // ones and sizes larger than the one announced in prepareToPlay().
-    runPassThroughCheck (processor, 44100.0,  2, 1,    "bypass is untouched: stereo 44.1 kHz, 1-sample block");
-    runPassThroughCheck (processor, 48000.0,  2, 17,   "bypass is untouched: stereo 48 kHz, 17-sample block");
-    runPassThroughCheck (processor, 96000.0,  2, 512,  "bypass is untouched: stereo 96 kHz, 512-sample block");
-    runPassThroughCheck (processor, 192000.0, 1, 4096, "bypass is untouched: mono 192 kHz, 4096-sample block");
+    runBypassCheck (processor, 44100.0,  2, 1,    "bypass is the input delayed by the reported latency: stereo 44.1 kHz, 1-sample block");
+    runBypassCheck (processor, 48000.0,  2, 17,   "bypass is the input delayed by the reported latency: stereo 48 kHz, 17-sample block");
+    runBypassCheck (processor, 96000.0,  2, 512,  "bypass is the input delayed by the reported latency: stereo 96 kHz, 512-sample block");
+    runBypassCheck (processor, 192000.0, 1, 4096, "bypass is the input delayed by the reported latency: mono 192 kHz, 4096-sample block");
+
+    // The wrapper's bypass (VST3/AU) has to take the same route; JUCE's default
+    // would hand the input back early and fight the host's compensation.
+    runBypassCheck (processor, 48000.0,  2, 512,  "the host bypass is the input delayed by the reported latency: stereo 48 kHz",
+                    true);
 
     processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
     processor.prepareToPlay (sampleRate, blockSize);
@@ -327,7 +348,8 @@ int main()
 
         // The chain has to stay level-accurate when nothing is driven: a
         // full-scale sine measures -3.0 dB RMS.
-        check (std::abs (clean.rms - (-3.01)) < 0.6, "the clean chain is level-accurate");
+        // -6 dBFS in is -9.03 dB RMS out when the chain is clean.
+        check (std::abs (clean.rms - (-9.03)) < 0.6, "the clean chain is level-accurate");
     }
 
     //==========================================================================
@@ -520,11 +542,19 @@ int main()
         setParameterValue (processor, ParamIDs::wow, 0.0f);
         setParameterValue (processor, ParamIDs::flutter, 0.0f);
         setParameterValue (processor, ParamIDs::mix, 100.0f);
+        setParameterValue (processor, ParamIDs::input, 0.0f);
         setParameterValue (processor, ParamIDs::output, -12.0f);
 
         constexpr int longBlock = 4096;
         processor.setPlayConfigDetails (1, 1, sampleRate, longBlock);
         processor.prepareToPlay (sampleRate, longBlock);
+
+        // Prime the delay line, or the first samples of the measured block would
+        // still be silence and an instant gain jump would pass the "early" check.
+        juce::AudioBuffer<float> prime (1, (int) sampleRate);
+        fillWithSine (prime, 1000.0, sampleRate);
+        prime.applyGain (0.05f);
+        processAll (processor, prime, longBlock);
 
         setParameterValue (processor, ParamIDs::output, 12.0f);   // knob jump
 
@@ -532,6 +562,8 @@ int main()
         juce::AudioBuffer<float> output (1, longBlock);
         fillWithSine (input, 1000.0, sampleRate);
         fillWithSine (output, 1000.0, sampleRate);
+        input.applyGain (0.05f);
+        output.applyGain (0.05f);
 
         juce::MidiBuffer midi;
         processor.processBlock (output, midi);
@@ -539,12 +571,15 @@ int main()
         processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
 
-        const auto early = rmsDb (output, 0, 0, 96) - rmsDb (input, 0, 0, 96);
-        const auto late  = rmsDb (output, 0, longBlock - 480, 480)
-                         - rmsDb (input, 0, longBlock - 480, 480);
+        // Measured past the delay. An instant jump would put the -6 dBFS sine at
+        // about -18 dB straight away; this window is still climbing out of the
+        // old -41 dB, which is what the ramp is for.
+        const auto latency = processor.getReportedLatency();
+        const auto early = rmsDb (output, 0, latency, 64);
+        const auto late  = rmsDb (output, 0, longBlock - 480, 480);
 
-        check (early < 6.0, "a 24 dB output jump is ramped, not applied instantly");
-        check (late > 9.0, "the ramp reaches the new output level by the end of the block");
+        check (early < -25.0, "a 24 dB output jump is ramped, not applied instantly");
+        check (late > -20.0, "the ramp reaches the new output level by the end of the block");
     }
 
     //==========================================================================

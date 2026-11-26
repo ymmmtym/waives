@@ -102,6 +102,10 @@ namespace waives::tape
         const auto amount = std::max (1.0e-4f, drive);
         const auto offset = bias * amount;
 
-        return (std::tanh (amount * x + offset) - std::tanh (offset)) / amount;
+        // The bias costs slope at zero: the curve is only unity for quiet audio
+        // once that slope (sech^2) is divided back out.
+        const auto slope = std::max (1.0e-3f, 1.0f - std::tanh (offset) * std::tanh (offset));
+
+        return (std::tanh (amount * x + offset) - std::tanh (offset)) / (amount * slope);
     }
 }

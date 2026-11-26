@@ -56,6 +56,9 @@ namespace
     constexpr double flutterRateHz        = 6.3;    // reel eccentricity
     constexpr double flutterFastRateHz    = 9.7;    // a second partial, so it wobbles
 
+    // The low end of the HISS range, where the knob has to mean "off".
+    constexpr float minimumHissDecibels = -96.0f;
+
     // The bias in the saturator is what produces the even harmonics; without it
     // a symmetric curve only adds odd ones and sounds like a fuzz box.
     constexpr float saturationBias = 0.08f;
@@ -150,6 +153,18 @@ MyFirstTapeMachineAudioProcessor::createParameterLayout()
     return layout;
 }
 
+float MyFirstTapeMachineAudioProcessor::hissGainFor (float hissDecibels) noexcept
+{
+    // -96 dB is the "off" end of the knob: a hair of gain there is still audible
+    // at high monitoring levels on a silent passage.
+    if (hissDecibels <= minimumHissDecibels + 0.5f)
+        return 0.0f;
+
+    // A uniform generator between -1 and 1 has an RMS of 1/sqrt(3), so the hiss
+    // parameter can mean an RMS level.
+    return juce::Decibels::decibelsToGain (hissDecibels) * 1.7320508f;
+}
+
 MyFirstTapeMachineAudioProcessor::MyFirstTapeMachineAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -182,9 +197,13 @@ void MyFirstTapeMachineAudioProcessor::prepareToPlay (double sampleRate, int sam
 
     // 2x is enough for a tanh curve this gentle, and it keeps the latency the
     // host has to compensate at a couple of samples.
+    // useIntegerLatency: the oversampler then pads its own latency to a whole
+    // number of samples, which is what lets the dry tap line up with the wet
+    // path exactly.
     oversampling = std::make_unique<juce::dsp::Oversampling<float>> (
         (size_t) channels, 1,
         juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+        true,
         true);
     oversampling->initProcessing ((size_t) maximumBlockSize);
     oversampling->reset();
@@ -197,13 +216,18 @@ void MyFirstTapeMachineAudioProcessor::prepareToPlay (double sampleRate, int sam
     // The modulated read moves between base - depth and base + depth, so the
     // base has to stay above the depth for the read never to reach the write
     // head. The extra two samples are the interpolation margin.
-    baseDelaySamples = (float) (maxWowSamples + maxFlutterSamples + 2.0);
+    // A whole number of samples, so the unmodulated dry tap is an exact copy of
+    // the input rather than an interpolated one: the bypass has to be the input,
+    // just late.
+    baseDelaySamples = (float) std::ceil (maxWowSamples + maxFlutterSamples + 2.0);
 
-    const auto capacity = (int) std::ceil (baseDelaySamples) + oversamplingLatency + 8;
+    // The read can reach base + every depth added together, so the ring has to
+    // hold that much history or the clamp would flatten the top of the wow.
+    const auto maximumRead = baseDelaySamples + (float) (maxWowSamples + maxFlutterSamples);
+    const auto capacity = (int) std::ceil (maximumRead) + oversamplingLatency + 8;
     delayLine.prepare (channels, capacity);
 
     dryTapBuffer.setSize (channels, maximumBlockSize, false, true, false);
-    dryBuffer.setSize (channels, maximumBlockSize, false, true, false);
 
     constexpr double smoothingSeconds = 0.02;
 
@@ -213,6 +237,7 @@ void MyFirstTapeMachineAudioProcessor::prepareToPlay (double sampleRate, int sam
     smoothedToneHz.reset (sampleRate, smoothingSeconds);
     smoothedWowDepth.reset (sampleRate, smoothingSeconds);
     smoothedFlutterDepth.reset (sampleRate, smoothingSeconds);
+    smoothedHiss.reset (sampleRate, smoothingSeconds);
 
     smoothedInputGain.setCurrentAndTargetValue (
         juce::Decibels::decibelsToGain (inputParameter->load()));
@@ -224,6 +249,7 @@ void MyFirstTapeMachineAudioProcessor::prepareToPlay (double sampleRate, int sam
         (float) (wowMilliseconds * 0.001 * sampleRate) * wowParameter->load() * 0.01f);
     smoothedFlutterDepth.setCurrentAndTargetValue (
         (float) (flutterMilliseconds * 0.001 * sampleRate) * flutterParameter->load() * 0.01f);
+    smoothedHiss.setCurrentAndTargetValue (hissGainFor (hissParameter->load()));
 
     // The dry tap lags the write head by the base delay plus the oversampler's
     // own latency; without this the mix knob would comb filter.
@@ -247,7 +273,10 @@ void MyFirstTapeMachineAudioProcessor::prepareToPlay (double sampleRate, int sam
     updateCoefficients();
 
     // The delay line is part of the sound, so the host has to know about it.
-    setLatencySamples ((int) std::lround (baseDelaySamples) + oversamplingLatency);
+    const auto reportedLatency = (int) baseDelaySamples + oversamplingLatency;
+
+    setLatencySamples (reportedLatency);
+    reportedLatencySamples.store (reportedLatency, std::memory_order_relaxed);
 }
 
 void MyFirstTapeMachineAudioProcessor::releaseResources()
@@ -291,6 +320,17 @@ void MyFirstTapeMachineAudioProcessor::updateCoefficients() noexcept
 }
 
 //==============================================================================
+void MyFirstTapeMachineAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer,
+                                                             juce::MidiBuffer& midiMessages)
+{
+    // The host's own bypass goes through here. Passing the input straight
+    // through would ignore the latency the host compensates for, so the chain
+    // still runs and the output is the delayed, unprocessed dry signal.
+    hostBypassRequested.store (true, std::memory_order_relaxed);
+    processBlock (buffer, midiMessages);
+    hostBypassRequested.store (false, std::memory_order_relaxed);
+}
+
 void MyFirstTapeMachineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                                      juce::MidiBuffer& midiMessages)
 {
@@ -319,13 +359,19 @@ void MyFirstTapeMachineAudioProcessor::processBlock (juce::AudioBuffer<float>& b
                                      * wowParameter->load() * 0.01f);
     smoothedFlutterDepth.setTargetValue ((float) (flutterMilliseconds * 0.001 * sampleRate)
                                          * flutterParameter->load() * 0.01f);
+    smoothedHiss.setTargetValue (hissGainFor (hissParameter->load()));
 
-    smoothedWet.setTargetValue (bypassParameter->load() > 0.5f ? 0.0f : 1.0f);
+    // The host's bypass and the parameter do the same thing, and both fade: the
+    // bypassed output has to stay latency matched, not jump back in time.
+    const bool bypassed = hostBypassRequested.load (std::memory_order_relaxed)
+                       || bypassParameter->load() > 0.5f;
+
+    smoothedWet.setTargetValue (bypassed ? 0.0f : 1.0f);
 
     // A host may hand over a block longer than the one announced in
     // prepareToPlay(), so the buffers are filled in chunks of their own size
     // instead of being reallocated on the audio thread.
-    const int chunkSize = juce::jmax (1, dryBuffer.getNumSamples());
+    const int chunkSize = juce::jmax (1, dryTapBuffer.getNumSamples());
 
     for (int start = 0; start < numSamples; start += chunkSize)
     {
@@ -341,15 +387,6 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                                                      int length,
                                                      int channelsToProcess)
 {
-    // Dry audio is only needed while the wet signal is faded in or out: a fully
-    // processed block works in place, and a fully bypassed block is left alone.
-    // The chain still runs while bypassed so its state tracks the input.
-    const bool needsDry = smoothedWet.isSmoothing() || smoothedWet.getCurrentValue() < 1.0f;
-
-    if (needsDry)
-        for (int channel = 0; channel < channelsToProcess; ++channel)
-            dryBuffer.copyFrom (channel, 0, buffer, channel, start, length);
-
     // Retuning in bounded steps keeps a tone-knob move smooth without rebuilding
     // coefficients for every sample.
     constexpr int maximumRetuneInterval = 64;
@@ -394,8 +431,8 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
             for (int channel = 0; channel < channelsToProcess; ++channel)
                 delayLine.write (channel, buffer.getSample (channel, segmentStart + i) * inputGain);
 
-            delayLine.advance();
-
+            // Read before advancing: the cursor only moves on once both taps
+            // have taken their samples, so a delay of `d` is exactly `d`.
             for (int channel = 0; channel < channelsToProcess; ++channel)
             {
                 buffer.setSample (channel, segmentStart + i,
@@ -404,6 +441,8 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                                         delayLine.read (channel, baseDelaySamples
                                                                     + (float) oversamplingLatency));
             }
+
+            delayLine.advance();
         }
 
         // Pass 2: the saturator, oversampled so its harmonics do not alias.
@@ -414,6 +453,18 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                              .getSubBlock ((size_t) segmentStart, (size_t) step);
 
             auto oversampled = oversampling->processSamplesUp (block);
+
+            // Record-side emphasis: the top end is boosted before the tape
+            // saturates it, so the high frequencies are what break up first. The
+            // playback cut after the saturator undoes the boost.
+            for (size_t channel = 0; channel < oversampled.getNumChannels(); ++channel)
+            {
+                auto* samples = oversampled.getChannelPointer (channel);
+                auto& emphasis = preEmphasis[channel];
+
+                for (size_t i = 0; i < oversampled.getNumSamples(); ++i)
+                    samples[i] = emphasis.processSample (samples[i]);
+            }
 
             // 0.05 is a straight line for all practical purposes; 4 compresses a
             // -6 dBFS sine by about 6 dB. The bias grows with drive as well, so
@@ -434,16 +485,16 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
             oversampling->processSamplesDown (block);
         }
 
-        // Pass 3: playback EQ, tone, DC block, hiss, mix and the output trim.
-
-        // A uniform generator between -1 and 1 has an RMS of 1/sqrt(3), so the
-        // hiss parameter can mean an RMS level.
-        const auto hissGain = juce::Decibels::decibelsToGain (hissParameter->load()) * 1.7320508f;
-
+        // Pass 3: playback EQ, tone, DC block, hiss, mix, bypass and the output
+        // trim. Everything happens in one pass, because the bypass crossfades
+        // against the same delayed dry tap the mix knob uses: a bypassed signal
+        // has to leave the plugin at the latency the host compensates for.
         for (int i = 0; i < step; ++i)
         {
             const auto mix = smoothedMix.getNextValue();
+            const auto wetAmount = smoothedWet.getNextValue();
             const auto outputGain = smoothedOutputGain.getNextValue();
+            const auto hissGain = smoothedHiss.getNextValue();
 
             for (int channel = 0; channel < channelsToProcess; ++channel)
             {
@@ -456,40 +507,12 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                 value += noiseSources[(size_t) channel].next() * hissGain;
 
                 const auto dryTap = dryTapBuffer.getSample (channel, i);
-                const auto wet = dryTap + (value - dryTap) * mix;
+                const auto mixed = dryTap + (value - dryTap) * mix;
+                const auto output = dryTap + (mixed - dryTap) * wetAmount;
 
-                buffer.setSample (channel, segmentStart + i, wet * outputGain);
+                buffer.setSample (channel, segmentStart + i, output * outputGain);
+                waives::dsp::updatePeak (meterLevels[(size_t) channel], std::abs (output));
             }
-        }
-    }
-
-    if (! needsDry)
-    {
-        for (int i = 0; i < length; ++i)
-            for (int channel = 0; channel < channelsToProcess; ++channel)
-                meterLevels[(size_t) channel].store (
-                    std::max (meterLevels[(size_t) channel].load (std::memory_order_relaxed),
-                              std::abs (buffer.getSample (channel, start + i))),
-                    std::memory_order_relaxed);
-
-        return;
-    }
-
-    for (int i = 0; i < length; ++i)
-    {
-        const auto wetAmount = smoothedWet.getNextValue();
-
-        for (int channel = 0; channel < channelsToProcess; ++channel)
-        {
-            auto* samples = buffer.getWritePointer (channel) + start;
-            const auto dry = dryBuffer.getSample (channel, i);
-
-            samples[i] = dry + (samples[i] - dry) * wetAmount;
-
-            meterLevels[(size_t) channel].store (
-                std::max (meterLevels[(size_t) channel].load (std::memory_order_relaxed),
-                          std::abs (samples[i])),
-                std::memory_order_relaxed);
         }
     }
 }

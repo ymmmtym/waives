@@ -122,21 +122,28 @@ MyFirstTapeMachineAudioProcessorEditor::MyFirstTapeMachineAudioProcessorEditor (
                                                                  knob.slider);
     }
 
-    for (int program = 0; program < processorRef.getNumPrograms(); ++program)
-        presetBox.addItem (processorRef.getProgramName (program), program + 1);
-
-    presetBox.setSelectedItemIndex (processorRef.getCurrentProgram(), juce::dontSendNotification);
-    presetBox.setTooltip ("Factory presets. Moving a knob keeps the sound, the name stays as a hint.");
-    presetBox.setTitle ("Preset");
-    presetBox.setColour (juce::ComboBox::backgroundColourId, juce::Colours::transparentBlack);
-    presetBox.setColour (juce::ComboBox::textColourId, textPrimary);
-    presetBox.setColour (juce::ComboBox::outlineColourId, textSecondary.withAlpha (0.3f));
-    presetBox.setColour (juce::ComboBox::arrowColourId, accent);
-    presetBox.onChange = [this]
+    presetButton.setTooltip ("Factory presets. Picking the current one again reloads it.");
+    presetButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    presetButton.setColour (juce::TextButton::textColourOffId, textPrimary);
+    presetButton.onClick = [this]
     {
-        processorRef.applyFactoryPreset (presetBox.getSelectedItemIndex());
+        juce::PopupMenu menu;
+
+        for (int program = 0; program < processorRef.getNumPrograms(); ++program)
+            menu.addItem (program + 1, processorRef.getProgramName (program), true,
+                          program == processorRef.getCurrentProgram());
+
+        // A menu rather than a combo box: a combo box does not report a click on
+        // the item that is already selected, so re-picking a preset after
+        // turning a knob could never restore it.
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
+                            [this] (int result)
+                            {
+                                if (result > 0)
+                                    processorRef.applyFactoryPreset (result - 1);
+                            });
     };
-    addAndMakeVisible (presetBox);
+    addAndMakeVisible (presetButton);
 
     bypassButton.setButtonText ("BYPASS");
     bypassButton.setColour (juce::ToggleButton::textColourId, textSecondary);
@@ -168,10 +175,7 @@ void MyFirstTapeMachineAudioProcessorEditor::timerCallback()
 {
     updateInfoLabel();
 
-    const auto program = processorRef.getCurrentProgram();
-
-    if (presetBox.getSelectedItemIndex() != program)
-        presetBox.setSelectedItemIndex (program, juce::dontSendNotification);
+    presetButton.setButtonText (processorRef.getProgramName (processorRef.getCurrentProgram()));
 
     // Meter: jump to a new peak, fall back smoothly, so a transient stays
     // readable without the bar flickering.
@@ -206,7 +210,7 @@ void MyFirstTapeMachineAudioProcessorEditor::updateInfoLabel()
     const juce::String text = juce::String (sampleRate / 1000.0, 1) + " kHz   "
                             + juce::String (processorRef.getActiveChannelCount()) + " ch   "
                             + juce::String (processorRef.getCurrentBlockSize()) + " samples   "
-                            + juce::String (processorRef.getLatencySamples()) + " smp latency";
+                            + juce::String (processorRef.getReportedLatency()) + " smp latency";
 
     infoLabel.setText (text, juce::dontSendNotification);
 
@@ -326,7 +330,7 @@ void MyFirstTapeMachineAudioProcessorEditor::resized()
     auto statusRow = area.removeFromTop (26);
     bypassButton.setBounds (statusRow.removeFromRight (92));
     statusRow.removeFromRight (8);
-    presetBox.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
+    presetButton.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
     statusRow.removeFromLeft (10);
     statusLabel.setBounds (statusRow);
 

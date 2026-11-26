@@ -38,6 +38,8 @@ public:
 
     using juce::AudioProcessor::processBlock;   // keep the double-precision overload visible
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
+    using juce::AudioProcessor::processBlockBypassed;
+    void processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
 
     //==========================================================================
     juce::AudioProcessorEditor* createEditor() override;
@@ -65,6 +67,10 @@ public:
     //==========================================================================
     // Written by the audio thread, read by the editor's timer.
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load (std::memory_order_relaxed); }
+
+    /** The delay this plugin adds, safe to read from the editor while the audio
+        thread re-prepares. */
+    int getReportedLatency() const noexcept { return reportedLatencySamples.load (std::memory_order_relaxed); }
     int    getCurrentBlockSize()  const noexcept { return currentBlockSize.load (std::memory_order_relaxed); }
     int    getActiveChannelCount() const noexcept { return activeChannels.load (std::memory_order_relaxed); }
 
@@ -80,6 +86,9 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    /** Gain for the noise generator, zero at the "off" end of the knob. */
+    static float hissGainFor (float hissDecibels) noexcept;
 
     void updateCoefficients() noexcept;
     void processChunk (juce::AudioBuffer<float>& buffer, int start, int length, int channelsToProcess);
@@ -101,6 +110,7 @@ private:
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedInputGain;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedOutputGain;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedWet;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedHiss;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear>         smoothedMix;
 
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> smoothedDrive;
@@ -140,11 +150,13 @@ private:
     // with the oversampled wet path.
     juce::AudioBuffer<float> dryTapBuffer;
 
-    // The host's signal before the plugin, kept for the bypass crossfade.
-    juce::AudioBuffer<float> dryBuffer;
+    // Both the mix knob and the bypass crossfade against that tap, so a bypassed
+    // signal still leaves the plugin at the reported latency.
 
     std::atomic<int>    currentProgram { 0 };
     std::atomic<double> currentSampleRate { 0.0 };
+    std::atomic<int>    reportedLatencySamples { 0 };
+    std::atomic<bool>   hostBypassRequested { false };
     std::atomic<int>    currentBlockSize  { 0 };
     std::atomic<int>    activeChannels    { 0 };
 

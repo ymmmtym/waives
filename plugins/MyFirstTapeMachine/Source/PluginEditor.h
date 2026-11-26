@@ -44,7 +44,7 @@ private:
     // Input, drive, tone, wow / flutter, hiss, mix, output.
     std::array<Knob, 8> knobs;
 
-    juce::ComboBox presetBox;
+    juce::TextButton presetButton { "Preset" };
     juce::ToggleButton bypassButton;
 
     // Declared after the sliders so they are destroyed first.
