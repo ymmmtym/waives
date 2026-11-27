@@ -11,6 +11,7 @@ Linux では VST3 / CLAP / スタンドアローンを、macOS では加えて A
 |-----------|------|------|
 | [`MyFirstMasteringEQ`](plugins/MyFirstMasteringEQ/) | 4 バンド・ピーキング EQ（マスタリング用） | VST3 / CLAP / Standalone / AU |
 | [`MyFirstTapeMachine`](plugins/MyFirstTapeMachine/) | テープ・シミュレーター（サチュレーション / ワウ・フラッター / ヒス） | VST3 / CLAP / Standalone / AU |
+| [`MyFirstTubeAmp`](plugins/MyFirstTubeAmp/) | 真空管アンプ（2 段の真空管 / トーン・スタック / サグ / キャビネット） | VST3 / CLAP / Standalone / AU |
 
 ```
 plugins/<PluginName>/
@@ -152,6 +153,62 @@ DAW のプリセットメニュー（`getNumPrograms()` / `setCurrentProgram()`�
 ヘッドレステストは、DRIVE を上げると THD が増えること、フルスケール入力でも出力が
 1.0 を超えないこと、DRIVE 0 のときにレベルが入力と一致すること（-3.0 dB RMS）を確認している。
 
+### MyFirstTubeAmp — 真空管アンプ
+
+`plugins/MyFirstTubeAmp/`。プリアンプ段とパワー段の 2 段で、間にカップリング・コンデンサ、
+後段にトーン・スタックと 4x12 のキャビネットを置いた構成。
+
+```
+入力
+  → GAIN（+0〜+30 dB）
+  → サグ（電源の落ち込み。5 ms で下がり 250 ms で戻る）
+  → 真空管 1 段目（バイアス付き tanh）
+  → カップリング・コンデンサ（20 Hz のハイパス）
+  → 真空管 2 段目（パワー段。硬い tanh）
+  ← ここまで 4 倍にオーバーサンプリング
+  → トーン・スタック（BASS 100 Hz / MID 700 Hz / TREBLE 3.2 kHz / PRESENCE 2.6 kHz）
+  → キャビネット（HPF 75 Hz / LPF 5 kHz / 900 Hz を -3 dB。ON/OFF 可）
+  → DC カット
+  → OUTPUT
+```
+
+- **1 段目は非対称**（グリッド・バイアス 0.15）。対称なカーブだと奇数次倍音しか出ず、真空管ではなくファズに聞こえます。バイアス分は `tanh(bias)` を引いて打ち消してあるので DC は乗りません
+- **2 段目は対称で硬め**（`tanh(1.6x)/1.6`）。1 段目で付いた非対称を増幅して潰すのがパワー段の仕事
+- **サグ**は整流した入力の包絡で入力ゲインを削ります。和音のアタックで一瞬沈んで戻る、あの挙動
+- **キャビネット**は閉じた 4x12 の近似（下は出ない、上も出ない、900 Hz が引っ込む）。
+  ON/OFF はフィルタを止めるのではなく**クロスフェード**するので、切り替えでクリックしません。
+  自分の IR を使うときは OFF にします
+- 2 段の非線形を 4 倍にオーバーサンプリング。ハード・クリップした信号は折り返しが最も耳に付くため、テープ（2 倍）より高い倍率にしています
+
+#### パラメータ
+
+| 表示名 | ID | 範囲 | デフォルト | 説明 |
+|--------|-----|------|-----------|------|
+| Gain | `gain` | 0 – +30 dB | 6 dB | 1 段目をどこまで叩くか |
+| Bass | `bass` | -12 – +12 dB | +2 dB | 100 Hz のロー・シェルフ |
+| Mid | `mid` | -12 – +12 dB | 0 dB | 700 Hz のベル |
+| Treble | `treble` | -12 – +12 dB | +2 dB | 3.2 kHz のハイ・シェルフ |
+| Presence | `presence` | 0 – +12 dB | +3 dB | 2.6 kHz のベル。実機と同じくブーストのみ |
+| Sag | `sag` | 0 – 100 % | 30 % | 電源の落ち込み |
+| Output | `output` | -24 – +12 dB | 0 dB | 出力トリム |
+| Cabinet | `cabinet` | off / on | on | 4x12 のキャビネット |
+| Bypass | `bypass` | off / on | off | 10 ms クロスフェード付きの素通し |
+
+#### プリセット
+
+| # | 名前 | Gain | Bass | Mid | Treble | Presence | Sag | Cabinet |
+|---|------|------|------|-----|--------|----------|-----|---------|
+| 1 | Default | 6 dB | +2 | 0 | +2 | +3 | 30 % | on |
+| 2 | Clean headroom | 0 dB | +1 | 0 | +1 | +2 | 10 % | on |
+| 3 | Crunch | 16 dB | +2 | +2 | +2 | +4 | 40 % | on |
+| 4 | Lead | 24 dB | +3 | +4 | +3 | +6 | 55 % | on |
+| 5 | Head only | 6 dB | +2 | 0 | +2 | +3 | 30 % | off |
+
+ヘッドレステストは、GAIN とともに THD が増えること（0 dB で 3 %、18 dB で約 30 %、30 dB で約 38 %）、
+フルスケール入力でも出力が暴れないこと、偶数次と奇数次が両方出ていること、各トーン・ノブが
+それぞれの帯域だけを動かすこと、キャビネットの帯域制限、サグでレベルが落ち込むこと、
+デフォルト・プリセットが入力レベルとほぼ同じで「温かいが汚くない」範囲に収まることを確認している。
+
 ## 環境
 
 | 項目 | 内容 |
@@ -175,7 +232,7 @@ main にマージするたびに自動で作られ、タグは `v<バージョ�
 | `<Plugin>-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
 | `SHA256SUMS` | 上記のチェックサム |
 
-`<Plugin>` は `MyFirstMasteringEQ` と `MyFirstTapeMachine`。
+`<Plugin>` は `MyFirstMasteringEQ`、`MyFirstTapeMachine`、`MyFirstTubeAmp`。
 展開すると `<Plugin>_artefacts/Release/`、`LICENSE`、`THIRD-PARTY-NOTICES.md` が出てくる。
 
 ### Linux
@@ -384,6 +441,18 @@ Logic は起動時に AU を再スキャンする。出てこない場合は Log
 | バイパス | MIX のドライ側と同じ「遅延させただけの入力」とクロスフェードするので、レイテンシ補償のあるホストでも時間軸がずれない。ホスト側のバイパス（`processBlockBypassed()`）も同じ経路を通る |
 
 `processBlock()` 内で確保するものは無い。オーバーサンプラーも遅延線も `prepareToPlay()` で作る。
+
+### MyFirstTubeAmp
+
+| 項目 | 内容 |
+|------|------|
+| 非線形 | 1 段目 `tanh(x + b) - tanh(b)`（b = 0.15 のグリッド・バイアス）、2 段目 `tanh(1.6x)/1.6` |
+| オーバーサンプリング | 4 倍（`juce::dsp::Oversampling`、IIR ハーフバンド）。遅延は `setLatencySamples()` で報告 |
+| カップリング | 1 ポールのハイパス 1 段（`AmpElements.h`）。4 倍レートで動かす |
+| サグ | 整流＋1 ポールの包絡（アタック 5 ms / リリース 250 ms）。ステレオはモノ和で 1 本の電源を共有 |
+| トーン・スタック | 独立した 4 つの biquad（ロー・シェルフ / ベル / ハイ・シェルフ / ベル）。受動回路の相互作用は近似していない |
+| キャビネット | HPF / LPF / ベルの 3 つ。常に動かしておき、ON/OFF はドライとのクロスフェードで切り替える |
+| スムージング | 20 ms。トーンは 64 サンプル単位で係数を更新 |
 
 ## 5. テスト
 
