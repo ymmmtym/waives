@@ -11,7 +11,7 @@ JUCE 製オーディオプラグインのモノレポ。このファイルは、
 | 項目 | 内容 |
 |------|------|
 | 構成 | `plugins/<PluginName>/` に 1 プラグイン 1 ディレクトリ |
-| 形式 | Linux: VST3 / CLAP / Standalone、macOS: 加えて AU（universal） |
+| 形式 | Linux: VST3 / CLAP / Standalone、macOS: 加えて AU |
 | 言語 | C++17 |
 | ビルド | CMake 3.22+ / Ninja |
 | バージョン | `VERSION` が唯一の源。リリースタグは `v<VERSION>-<sha7>` |
@@ -53,10 +53,17 @@ sudo apt install -y build-essential cmake ninja-build pkg-config \
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --no-tests=error --output-on-failure
 ```
 
+`--no-tests=error` は必須。`WAIVES_BUILD_TESTS=OFF` で configure した `build/` を使い
+回すとテストが 1 件も登録されず、CTest は**0 件でも成功を返す**。`--no-tests=error` なら
+落ちる。実行件数（`100% tests passed, 0 tests failed out of N`）も毎回読む。
+
 - `libfontconfig1-dev` が無いと configure が `juceaide` のリンクで落ちる。
+- macOS の AU は**指定したアーキテクチャの分だけ**できる。CI は universal
+  （`-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`）で作るので、ローカルでも同じものを
+  作りたいときはこの指定を付ける。省略すると実行中の Mac のアーキテクチャのみになる。
 - JUCE は初回 configure で `.cache/fetchcontent/` に入る（`build/` を消しても再取得しない）。
 - 出力は `build/plugins/<Name>/<Target>_artefacts/Release/{VST3,CLAP,Standalone,AU}/`。
 - オプション: `-DWAIVES_BUILD_CLAP=OFF`、`-DWAIVES_BUILD_TESTS=OFF`、
@@ -73,6 +80,9 @@ stderr に出るだけで、`| grep error` では成功に見える。テスト�
 1. `plugins/<Name>/CMakeLists.txt` に `waives_add_plugin()` と
    `waives_add_plugin_tests()` を書く。`MANUFACTURER_CODE` / `PLUGIN_CODE` は
    4 文字で、プラグイン間で重複すると configure が止める。
+   **`CLAP_ID`（と `CLAP_FEATURES`）を必ず書く。** `waives_add_plugin()` は `CLAP_ID`
+   が無いと CLAP をビルドしないのに、CI の clap-validator は CLAP バンドルを無条件に
+   検証するので、書き忘れると CI だけが落ちる。
 2. ルート `CMakeLists.txt` の `WAIVES_PLUGINS` に名前を足す。
 3. `.github/workflows/build.yml` と `release.yml` の `matrix.plugin` に足す。
 4. `README.md` の表・プラグイン節・「4. 信号処理」の表を更新する。
@@ -102,7 +112,9 @@ stderr に出るだけで、`| grep error` では成功に見える。テスト�
 - `juce::dsp::Oversampling` は `useIntegerLatency = true` で作り、報告レイテンシを整数にする。
 - サンプルレート依存の係数を UI スレッドで作らない（`prepareToPlay()` で作る）。
 - 0 dB / off のときに「数学的には恒等」でも bit-exact にならない場合がある（FMA）。
-  素通しを保証したいところは恒等係数に差し替える。
+  素通しを保証したいところは恒等係数に差し替える。このとき**フィルタの状態
+  （`z1` / `z2`）もリセットする**。係数だけ差し替えると、前の音の残りが次の出力に
+  足される（`MyFirstMasteringEQ` の `Biquad::reset()` がその例）。
 
 ### パラメータ
 
@@ -117,7 +129,10 @@ stderr に出るだけで、`| grep error` では成功に見える。テスト�
 - エディタはホストがいつ壊してもおかしくない。`Timer`・非同期コールバック・
   `PopupMenu::showMenuAsync` は **`juce::Component::SafePointer`** を捕まえる
   （`this` を生で捕まえない）。
-- `prepareToPlay()` の後に `setSize()` を呼ばない（ホストが固まる）。
+- 禁止なのは**オーディオ側のバッファ**、つまり `prepareToPlay()` 済みのプロセッサで
+  `juce::AudioBuffer::setSize()` を呼ぶこと（オーディオスレッドでの確保になる）。
+  エディタ初期化での `juce::Component::setSize()` は普通に必要なので、
+  コンストラクタ / `resized()` で呼んでよい。
 - `ComboBox` は「すでに選ばれている項目」のクリックを報告しない。プリセットの
   再選択が要るなら `TextButton` + `PopupMenu` にする。
 - 色は `PluginEditor.cpp` の先頭にまとめた定数を使い、OS 依存のネイティブ UI を使わない。
