@@ -172,8 +172,10 @@ namespace
                          double sampleRate, int numChannels, int blockSize,
                          const char* what, bool hostBypass = false)
     {
-        if (! hostBypass)
-            setParameterValue (processor, ParamIDs::bypass, 1.0f);
+        // The two bypass routes are different code, so each check starts from a
+        // known state: the parameter on only for the parameter route, or the
+        // host route would pass without processBlockBypassed() doing anything.
+        setParameterValue (processor, ParamIDs::bypass, hostBypass ? 0.0f : 1.0f);
 
         processor.setPlayConfigDetails (numChannels, numChannels, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);

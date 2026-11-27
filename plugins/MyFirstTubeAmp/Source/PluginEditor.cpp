@@ -132,11 +132,13 @@ MyFirstTubeAmpAudioProcessorEditor::MyFirstTubeAmpAudioProcessorEditor (MyFirstT
         // A menu rather than a combo box: a combo box does not report a click on
         // the item that is already selected, so re-picking a preset after
         // turning a knob could never restore it.
+        // The menu outlives this call, and the host can destroy the editor while
+        // it is open, so hold a safe pointer rather than `this`.
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetButton),
-                            [this] (int result)
+                            [safe = juce::Component::SafePointer<MyFirstTubeAmpAudioProcessorEditor> (this)] (int result)
                             {
-                                if (result > 0)
-                                    processorRef.applyFactoryPreset (result - 1);
+                                if (result > 0 && safe != nullptr)
+                                    safe->processorRef.applyFactoryPreset (result - 1);
                             });
     };
     addAndMakeVisible (presetButton);
