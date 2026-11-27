@@ -13,7 +13,7 @@ set(WAIVES_PLUGIN_DEFINITIONS
 #     COMPANY_NAME <name> BUNDLE_ID <id>
 #     MANUFACTURER_CODE <XXXX> PLUGIN_CODE <XXXX>
 #     DESCRIPTION <text>
-#     [CLAP_ID <id> CLAP_FEATURES <feature>...]
+#     [CLAP_ID <id>] [CLAP_FEATURES <feature>...]
 #     SOURCES <file>...
 #     [LINK_LIBRARIES <lib>...])
 #
@@ -22,8 +22,8 @@ set(WAIVES_PLUGIN_DEFINITIONS
 function(waives_add_plugin target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG
         ""
-        "COMPANY_NAME;BUNDLE_ID;MANUFACTURER_CODE;PLUGIN_CODE;DESCRIPTION;CLAP_ID;CLAP_FEATURES"
-        "SOURCES;LINK_LIBRARIES")
+        "COMPANY_NAME;BUNDLE_ID;MANUFACTURER_CODE;PLUGIN_CODE;DESCRIPTION;CLAP_ID"
+        "SOURCES;LINK_LIBRARIES;CLAP_FEATURES")
 
     foreach(required COMPANY_NAME BUNDLE_ID MANUFACTURER_CODE PLUGIN_CODE SOURCES)
         if(NOT ARG_${required})
@@ -67,6 +67,9 @@ function(waives_add_plugin target)
 
     target_sources(${target} PRIVATE ${ARG_SOURCES})
     target_compile_definitions(${target} PUBLIC ${WAIVES_PLUGIN_DEFINITIONS})
+
+    # Filter and noise helpers shared by every plugin (shared/WaivesDsp.h).
+    target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/shared")
 
     target_link_libraries(${target}
         PRIVATE ${ARG_LINK_LIBRARIES}
@@ -112,7 +115,8 @@ function(waives_add_plugin_tests target)
 
     target_include_directories(${target} PRIVATE
         ${ARG_INCLUDE_DIRS}
-        "${PROJECT_SOURCE_DIR}/tests")
+        "${PROJECT_SOURCE_DIR}/tests"
+        "${PROJECT_SOURCE_DIR}/shared")
 
     target_compile_definitions(${target} PRIVATE
         JUCE_WEB_BROWSER=0
@@ -155,7 +159,8 @@ function(waives_add_plugin_benchmark target)
 
     target_include_directories(${target} PRIVATE
         ${ARG_INCLUDE_DIRS}
-        "${PROJECT_SOURCE_DIR}/tests")
+        "${PROJECT_SOURCE_DIR}/tests"
+        "${PROJECT_SOURCE_DIR}/shared")
 
     target_compile_definitions(${target} PRIVATE
         JUCE_WEB_BROWSER=0

@@ -10,6 +10,7 @@ Linux では VST3 / CLAP / スタンドアローンを、macOS では加えて A
 | プラグイン | 内容 | 形式 |
 |-----------|------|------|
 | [`MyFirstMasteringEQ`](plugins/MyFirstMasteringEQ/) | 4 バンド・ピーキング EQ（マスタリング用） | VST3 / CLAP / Standalone / AU |
+| [`MyFirstTapeMachine`](plugins/MyFirstTapeMachine/) | テープ・シミュレーター（サチュレーション / ワウ・フラッター / ヒス） | VST3 / CLAP / Standalone / AU |
 
 ```
 plugins/<PluginName>/
@@ -21,13 +22,16 @@ plugins/<PluginName>/
 共通部分（JUCE の取得、出力フォーマット、警告フラグ、テスト用ハーネス）は
 `CMakeLists.txt` と `cmake/WaivesPlugin.cmake` にまとめてある。
 
-**現在の状態: Step 5 完了** — 4 バンドのピーキング EQ として動作。
-バンドごとの Frequency / Gain / Q と Band Bypass、バンド選択付きのノブ UI、
-4 バンドの合成カーブを描く周波数特性グラフ（ノードをドラッグして操作できる）、
-10 ms クロスフェード付きのバイパス（全体 / バンド単位）、バンド単位のソロを実装済み。
-残りは macOS での AU ビルドと Logic での確認（Step 6）。
+## プラグイン
 
-## パラメータ
+### MyFirstMasteringEQ — 4 バンド・ピーキング EQ
+
+`plugins/MyFirstMasteringEQ/`。バンドごとの Frequency / Gain / Q と Band Bypass、
+バンド選択付きのノブ UI、4 バンドの合成カーブを描く周波数特性グラフ
+（ノードをドラッグして操作できる）、10 ms クロスフェード付きのバイパス
+（全体 / バンド単位）、バンド単位のソロを実装している。
+
+#### パラメータ
 
 4 バンドのピーキング EQ を**直列**につないでいる。各バンドが Frequency / Gain / Q を持つ。
 
@@ -56,7 +60,7 @@ plugins/<PluginName>/
 **ソロはパラメータではない**。聴き比べのための一時的な状態なので、セッションには
 保存されない（開き直すと解除されている）。
 
-### バンドの選び方
+#### バンドの選び方
 
 - **1〜4 のボタン**で編集するバンドを選ぶ。3 つのノブは選択中バンドの値に切り替わる
 - **グラフのノードをドラッグ**すると、そのバンドの Frequency（横）と Gain（縦）が変わる。
@@ -73,7 +77,7 @@ plugins/<PluginName>/
 同じ位置にノードが重なっているときは、選択中のバンドが優先して掴まれる。
 Bypass 中・ソロで外れているバンドは、カーブが薄く、ノードが中抜きで描かれる。
 
-## プリセット
+#### プリセット
 
 DAW のプリセットメニュー（`getNumPrograms()` / `setCurrentProgram()`）と、
 エディタ左上のドロップダウンの両方から選べる。
@@ -90,6 +94,66 @@ DAW のプリセットメニュー（`getNumPrograms()` / `setCurrentProgram()`�
 - ノブを動かしても音はそのまま変わり、プリセット名は「最後に選んだもの」として残る
 - セッションを保存すると選択中のプリセット番号も保存され、開き直すと名前が復元される
 
+### MyFirstTapeMachine — テープ・シミュレーター
+
+`plugins/MyFirstTapeMachine/`。テープの「録音 → 再生」を 1 本の信号経路として組んだもの。
+キャラクターを作る 3 つ（サチュレーション、ワウ・フラッター、ヒス）を、それぞれ独立したノブにしてある。
+
+信号経路:
+
+```
+入力トリム
+  → プリエンファシス（+4 dB @ 3 kHz）
+  → 遅延線（ワウ / フラッターで読み出し位置が揺れる）
+  → サチュレーション（2 倍にオーバーサンプリング）
+  → ヘッドバンプ（+2.5 dB @ 65 Hz）
+  → ディエンファシス（-4 dB @ 3 kHz）
+  → トーン（ローパス 2〜18 kHz）
+  → DC カット
+  → ヒス
+  → MIX（遅延したドライと混ぜる）
+  → 出力トリム
+```
+
+- **ワウ / フラッター**は遅延線の読み出し位置を LFO で動かしている。ワウは 0.63 Hz（最大 3 ms）、
+  フラッターは 6.3 Hz と 9.7 Hz の 2 成分（最大 0.35 ms）。片方だけだと機械的に聞こえるため
+- **サチュレーション**は非対称の tanh。バイアスをかけているので**偶数次倍音**が出る
+  （対称なカーブだと奇数次だけになり、ファズっぽくなる）。小信号のゲインは 1 のままなので、
+  DRIVE は音量ではなく質を変える
+- 倍音が折り返して汚くならないよう、サチュレータだけ 2 倍にオーバーサンプリングしている
+- 遅延線の分だけレイテンシーがある（48 kHz で約 3.6 ms）。`setLatencySamples()` で報告するので
+  ホストが補正する
+- MIX は**遅延したドライ**と混ぜる。遅延前のドライと混ぜると、その差がコムフィルターになるため
+
+#### パラメータ
+
+| 表示名 | ID | 範囲 | デフォルト | スケール | 説明 |
+|--------|-----|------|-----------|----------|------|
+| Input | `input` | -12 – +12 dB | 0 dB | 線形 | テープに送るレベル |
+| Drive | `drive` | 0 – 10 | 2 | 線形 | サチュレーションの強さ。0 でほぼ素通し |
+| Tone | `tone` | 2 – 18 kHz | 12 kHz | 対数 | 再生側の高域損失 |
+| Wow | `wow` | 0 – 100 % | 25 % | 線形 | 遅い速度むら（最大 3 ms） |
+| Flutter | `flutter` | 0 – 100 % | 15 % | 線形 | 細かい速度むら（最大 0.35 ms） |
+| Hiss | `hiss` | -96 – -24 dB | -84 dB | 線形 | テープノイズの実効値。-96 dB で無音 |
+| Mix | `mix` | 0 – 100 % | 100 % | 線形 | 遅延ドライとのミックス |
+| Output | `output` | -12 – +12 dB | 0 dB | 線形 | 出力トリム |
+| Bypass | `bypass` | off / on | off | 2 値 | 10 ms クロスフェード付きの素通し |
+
+#### プリセット
+
+| # | 名前 | Drive | Tone | Wow / Flutter | Hiss | 用途 |
+|---|------|-------|------|---------------|------|------|
+| 1 | Default | 2 | 12 kHz | 25 % / 15 % | -84 dB | 素のテープ |
+| 2 | Warm slap | 5 | 9 kHz | 30 % / 20 % | -78 dB | 太く、少しだけ揺らす |
+| 3 | Lo-fi cassette | 7 | 4.5 kHz | 60 % / 45 % | -66 dB | カセットの劣化 |
+| 4 | Mastering glue | 1.5 | 16 kHz | 8 % / 4 % | -96 dB | マスターバスに薄く |
+| 5 | Parallel crush | 9 | 6 kHz | 20 % / 10 % | -72 dB | MIX 40 % で潰す |
+
+ヘッドレステストは、DRIVE を上げると THD が増えること、フルスケール入力でも出力が
+1.0 を超えないこと、DRIVE 0 のときにレベルが入力と一致すること（-3.0 dB RMS）を確認している。
+
+## 環境
+
 | 項目 | 内容 |
 |------|------|
 | JUCE | 9.0.6（CMake の `FetchContent` で自動取得） |
@@ -103,14 +167,16 @@ DAW のプリセットメニュー（`getNumPrograms()` / `setCurrentProgram()`�
 main にマージするたびに自動で作られ、タグは `v<バージョン>-<短い SHA>`（例 `v0.1.0-1899315`）。
 バージョンはリポジトリ直下の `VERSION` で決まる。
 
+プラグイン × OS ごとに 1 つのアーカイブが付く。
+
 | ファイル | 中身 |
 |----------|------|
-| `MyFirstMasteringEQ-linux.tar.gz` | VST3 / CLAP / Standalone |
-| `MyFirstMasteringEQ-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
+| `<Plugin>-linux.tar.gz` | VST3 / CLAP / Standalone |
+| `<Plugin>-macos.tar.gz` | AU / VST3 / CLAP / Standalone（universal） |
 | `SHA256SUMS` | 上記のチェックサム |
 
-展開すると `MyFirstMasteringEQ_artefacts/Release/`、`LICENSE`、
-`THIRD-PARTY-NOTICES.md` が出てくる。
+`<Plugin>` は `MyFirstMasteringEQ` と `MyFirstTapeMachine`。
+展開すると `<Plugin>_artefacts/Release/`、`LICENSE`、`THIRD-PARTY-NOTICES.md` が出てくる。
 
 ### Linux
 
@@ -283,7 +349,9 @@ Logic は起動時に AU を再スキャンする。出てこない場合は Log
 
 ## 4. 信号処理
 
-1 バンドのピーキング EQ（biquad）を自前で実装している。
+### MyFirstMasteringEQ
+
+ピーキング EQ（biquad）を自前で実装している。
 
 | 項目 | 内容 |
 |------|------|
@@ -301,6 +369,21 @@ Logic は起動時に AU を再スキャンする。出てこない場合は Log
 > **0 dB を明示的に素通しにしている理由**: biquad は 0 dB で「数学的には」恒等写像だが、
 > FMA（積和融合）が有効な CPU（Apple silicon など）では丸め誤差が残り bit-exact にならない。
 > そのため ±0.001 dB 未満では恒等係数に差し替え、全プラットフォームで完全な素通しを保証する。
+
+### MyFirstTapeMachine
+
+| 項目 | 内容 |
+|------|------|
+| 遅延線 | チャンネルごとに `std::vector<float>`（`prepareToPlay()` で 1 回だけ確保）。線形補間で読み出す |
+| ワウ / フラッター | 読み出し位置を LFO で動かす。位相はサンプルごとに進め、1 周期で折り返す |
+| サチュレーション | `tanh(a·x + b) - tanh(b)` を a で割った非対称カーブ。2 倍にオーバーサンプリング（`juce::dsp::Oversampling`、IIR ハーフバンド） |
+| フィルタ | pre/de-emphasis、ヘッドバンプ、トーン、DC カットはいずれも RBJ の係数式を自前で計算（`TapeElements.h`）。ヒープ確保なし。pre-emphasis は遅延線のあと・サチュレーターの直前に入り、de-emphasis がその後で戻す |
+| ヒス | xorshift の白色ノイズをチャンネルごとに持つ。値は実効値（RMS）で解釈する |
+| スムージング | `juce::SmoothedValue`（20 ms）。トーンの再チューニングは 64 サンプル単位 |
+| レイテンシ | 遅延線の平均遅延（整数サンプル）+ オーバーサンプラーの遅延（整数化）を報告。48 kHz で約 3.6 ms |
+| バイパス | MIX のドライ側と同じ「遅延させただけの入力」とクロスフェードするので、レイテンシ補償のあるホストでも時間軸がずれない。ホスト側のバイパス（`processBlockBypassed()`）も同じ経路を通る |
+
+`processBlock()` 内で確保するものは無い。オーバーサンプラーも遅延線も `prepareToPlay()` で作る。
 
 ## 5. テスト
 
