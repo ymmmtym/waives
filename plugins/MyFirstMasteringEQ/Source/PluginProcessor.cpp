@@ -71,17 +71,28 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
     };
 
     // The AU wrapper sorts parameters by version hint and then by identifier
-    // hash, and hosts address automation by that position. Band 1 keeps hint 1
-    // with the bypass switch; the bands added later use hint 2 so they sort
-    // after everything v0.1.0 published and no existing automation index moves.
-    constexpr int legacyVersionHint = 1;
-    constexpr int newBandVersionHint = 2;
+    // hash, and hosts address automation by that position. Each release that
+    // added bands got a hint of its own, so no automation index published by an
+    // earlier version ever moves: hint 1 is v0.1.0 (band 1 and the bypass
+    // switch), hint 2 is v0.3.0 (bands 2..4 and their bypasses), hint 3 is
+    // v0.4.0 (bands 5..8 and their bypasses).
+    constexpr int legacyVersionHint  = 1;
+    constexpr int v03BandVersionHint = 2;
+    constexpr int v04BandVersionHint = 3;
+
+    const auto versionHintForBand = [] (int band)
+    {
+        if (band == 0)
+            return legacyVersionHint;
+
+        return band < 4 ? v03BandVersionHint : v04BandVersionHint;
+    };
 
     for (int band = 0; band < ParamIDs::numBands; ++band)
     {
         const auto index = (size_t) band;
         const auto suffix = suffixFor (band);
-        const int versionHint = band == 0 ? legacyVersionHint : newBandVersionHint;
+        const int versionHint = versionHintForBand (band);
 
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { ParamIDs::frequency[index], versionHint },
@@ -114,10 +125,11 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         "Bypass",
         false));
 
-    // Added in v0.3.0, so they sort after everything above.
+    // Band bypasses follow the band they belong to, so each generation sorts
+    // after everything published before it.
     for (int band = 0; band < ParamIDs::numBands; ++band)
         layout.add (std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::bandBypass[(size_t) band], newBandVersionHint },
+            juce::ParameterID { ParamIDs::bandBypass[(size_t) band], versionHintForBand (band) },
             "Band" + suffixFor (band) + " Bypass",
             false));
 

@@ -93,7 +93,26 @@ namespace
         return juce::Decibels::gainToDecibels (rmsOut / rmsIn);
     }
 
-    // Band 1 flat, bands 2..4 flat: the state a fresh instance starts from.
+    // The analytic curve for a chain whose first entries are `active` and whose
+    // remaining bands are flat. Built by hand so the expected values do not
+    // depend on the band count.
+    std::array<waives::peak::BandSettings, ParamIDs::numBands>
+    flatChain (std::initializer_list<waives::peak::BandSettings> active)
+    {
+        std::array<waives::peak::BandSettings, ParamIDs::numBands> chain {};
+
+        for (auto& band : chain)
+            band = { 1000.0f, 0.0f, 1.0f };
+
+        int index = 0;
+
+        for (const auto& band : active)
+            chain[(size_t) index++] = band;
+
+        return chain;
+    }
+
+    // Every band flat: the state a fresh instance starts from.
     void flattenBands (MyFirstMasteringEQAudioProcessor& processor)
     {
         for (int band = 0; band < ParamIDs::numBands; ++band)
@@ -192,6 +211,40 @@ int main()
 
     check (processor.getParameters().size() == 4 * ParamIDs::numBands + 1,
            "each band publishes freq/gain/q and its own bypass, plus the global bypass");
+
+    // The AU wrapper sorts by version hint and hosts address automation by that
+    // position, so every release that added bands had to use a hint of its own.
+    {
+        const auto hintOf = [&apvts] (const char* parameterID)
+        {
+            auto* parameter = apvts.getParameter (parameterID);
+            return parameter == nullptr ? -1 : parameter->getVersionHint();
+        };
+
+        check (hintOf (ParamIDs::frequency[0]) == 1 && hintOf (ParamIDs::gain[0]) == 1
+                   && hintOf (ParamIDs::q[0]) == 1 && hintOf (ParamIDs::bypass) == 1,
+               "band 1 and the bypass switch keep the v0.1.0 version hint");
+
+        const auto hintsAreExpected = [&hintOf] (int firstBand, int endBand, int expected)
+        {
+            for (int band = firstBand; band < endBand; ++band)
+            {
+                const auto index = (size_t) band;
+
+                if (hintOf (ParamIDs::frequency[index]) != expected
+                    || hintOf (ParamIDs::gain[index]) != expected
+                    || hintOf (ParamIDs::q[index]) != expected
+                    || hintOf (ParamIDs::bandBypass[index]) != expected)
+                    return false;
+            }
+
+            return true;
+        };
+
+        check (hintsAreExpected (1, 4, 2), "bands 2..4 keep the v0.3.0 version hint");
+        check (hintsAreExpected (4, ParamIDs::numBands, 3),
+               "bands 5..8 use a new version hint so older automation does not move");
+    }
 
     auto* freqParam = apvts.getParameter (ParamIDs::frequency[0]);
     auto* gainParam = apvts.getParameter (ParamIDs::gain[0]);
@@ -543,12 +596,7 @@ int main()
         setParameterValue (processor, ParamIDs::gain[1], 6.0f);
         setParameterValue (processor, ParamIDs::q[1], 1.0f);
 
-        const std::array<waives::peak::BandSettings, ParamIDs::numBands> chain {{
-            { 500.0f, 9.0f, 1.0f },
-            { 4000.0f, 6.0f, 1.0f },
-            { 1000.0f, 0.0f, 1.0f },
-            { 1000.0f, 0.0f, 1.0f },
-        }};
+        const auto chain = flatChain ({ { 500.0f, 9.0f, 1.0f }, { 4000.0f, 6.0f, 1.0f } });
 
         for (const double probeHz : { 500.0, 1000.0, 4000.0 })
         {
@@ -562,14 +610,20 @@ int main()
         }
 
         // The same boost in a different band must sound the same: the chain is
-        // ordered but the response is not.
-        flattenBands (processor);
-        setParameterValue (processor, ParamIDs::frequency[3], 1000.0f);
-        setParameterValue (processor, ParamIDs::gain[3], 12.0f);
-        setParameterValue (processor, ParamIDs::q[3], 1.0f);
+        // ordered but the response is not. The last band is included because it
+        // was added after the first release.
+        for (const int band : { 3, ParamIDs::numBands - 1 })
+        {
+            flattenBands (processor);
+            setParameterValue (processor, ParamIDs::frequency[(size_t) band], 1000.0f);
+            setParameterValue (processor, ParamIDs::gain[(size_t) band], 12.0f);
+            setParameterValue (processor, ParamIDs::q[(size_t) band], 1.0f);
 
-        const auto inBand4 = measureCurrentSettingsDb (processor, sampleRate, 1000.0);
-        check (std::abs (inBand4 - 12.0) < 0.5, "band 4 boosts like any other band");
+            const auto measured = measureCurrentSettingsDb (processor, sampleRate, 1000.0);
+            const auto label = "band " + juce::String (band + 1) + " boosts like any other band";
+
+            check (std::abs (measured - 12.0) < 0.5, label.toRawUTF8());
+        }
 
         flattenBands (processor);
     }
@@ -612,19 +666,9 @@ int main()
         setParameterValue (processor, ParamIDs::frequency[1], 4000.0f);
         setParameterValue (processor, ParamIDs::gain[1], -9.0f);
 
-        const std::array<waives::peak::BandSettings, ParamIDs::numBands> bothBands {{
-            { 1000.0f,  9.0f, 1.0f },
-            { 4000.0f, -9.0f, 1.0f },
-            { 1000.0f,  0.0f, 1.0f },
-            { 1000.0f,  0.0f, 1.0f },
-        }};
+        const auto bothBands = flatChain ({ { 1000.0f, 9.0f, 1.0f }, { 4000.0f, -9.0f, 1.0f } });
 
-        const std::array<waives::peak::BandSettings, ParamIDs::numBands> band1Only {{
-            { 1000.0f, 9.0f, 1.0f },
-            { 1000.0f, 0.0f, 1.0f },
-            { 1000.0f, 0.0f, 1.0f },
-            { 1000.0f, 0.0f, 1.0f },
-        }};
+        const auto band1Only = flatChain ({ { 1000.0f, 9.0f, 1.0f } });
 
         check (std::abs (measureCurrentSettingsDb (processor, sampleRate, 4000.0)
                          - waives::peak::combinedResponseDb (sampleRate, bothBands, 4000.0)) < 0.5,
@@ -787,6 +831,56 @@ int main()
                           && std::abs (migratedState.getRawParameterValue (ParamIDs::gain[(size_t) band])->load()) < 1.0e-3f;
 
         check (otherBandsFlat, "the new bands stay flat when an old session is opened");
+    }
+
+    //==========================================================================
+    // The same for a session saved by the four-band build: bands 5..8 must come
+    // up flat, and the four bands it did carry must survive.
+    {
+        MyFirstMasteringEQAudioProcessor fourBand;
+        setParameterValue (fourBand, ParamIDs::frequency[3], 3000.0f);
+        setParameterValue (fourBand, ParamIDs::gain[3], -4.0f);
+        setParameterValue (fourBand, ParamIDs::q[3], 2.0f);
+
+        auto fourBandState = fourBand.getValueTreeState().copyState();
+
+        for (int band = 4; band < ParamIDs::numBands; ++band)
+        {
+            const auto index = (size_t) band;
+
+            for (const auto* parameterID : { ParamIDs::frequency[index],
+                                             ParamIDs::gain[index],
+                                             ParamIDs::q[index],
+                                             ParamIDs::bandBypass[index] })
+            {
+                if (auto child = fourBandState.getChildWithProperty ("id", parameterID); child.isValid())
+                    fourBandState.removeChild (child, nullptr);
+            }
+        }
+
+        check (fourBandState.getNumChildren() == 4 * 4 + 1,
+               "the v0.3.0 fixture carries four bands plus the global bypass");
+
+        juce::MemoryBlock fourBandBlock;
+        juce::AudioProcessor::copyXmlToBinary (*fourBandState.createXml(), fourBandBlock);
+
+        MyFirstMasteringEQAudioProcessor migrated;
+        migrated.setStateInformation (fourBandBlock.getData(), (int) fourBandBlock.getSize());
+
+        auto& migratedState = migrated.getValueTreeState();
+
+        check (std::abs (migratedState.getRawParameterValue (ParamIDs::frequency[3])->load() - 3000.0f) < 1.0f,
+               "a four-band session restores band 4's frequency");
+        check (std::abs (migratedState.getRawParameterValue (ParamIDs::gain[3])->load() - (-4.0f)) < 1.0e-3f,
+               "a four-band session restores band 4's gain");
+
+        bool addedBandsFlat = true;
+
+        for (int band = 4; band < ParamIDs::numBands; ++band)
+            addedBandsFlat = addedBandsFlat
+                          && std::abs (migratedState.getRawParameterValue (ParamIDs::gain[(size_t) band])->load()) < 1.0e-3f;
+
+        check (addedBandsFlat, "bands 5..8 stay flat when a four-band session is opened");
     }
 
     //==========================================================================
@@ -999,6 +1093,51 @@ int main()
                        "the graph does not overlap the gain knob");
                 check (! curve->getBounds().intersects (band3Button->getBounds()),
                        "the graph does not overlap the band buttons");
+
+                // All eight bands have to sit in the row beside the two switches at
+                // the minimum width, so the row is checked as a whole.
+                {
+                    auto* soloSwitch = dynamic_cast<juce::Button*> (editor->findChildWithID ("soloButton"));
+                    auto* lastBandButton = dynamic_cast<juce::Button*> (
+                        editor->findChildWithID ("band" + juce::String (ParamIDs::numBands)));
+
+                    bool everyButtonIsThere = true;
+                    bool buttonsDoNotOverlap = true;
+
+                    for (int band = 0; band < ParamIDs::numBands; ++band)
+                    {
+                        auto* button = dynamic_cast<juce::Button*> (
+                            editor->findChildWithID ("band" + juce::String (band + 1)));
+
+                        everyButtonIsThere = everyButtonIsThere && button != nullptr;
+
+                        if (button == nullptr || band == 0)
+                            continue;
+
+                        auto* previous = dynamic_cast<juce::Button*> (
+                            editor->findChildWithID ("band" + juce::String (band)));
+
+                        buttonsDoNotOverlap = buttonsDoNotOverlap
+                            && editor->getLocalBounds().contains (button->getBounds())
+                            && previous != nullptr
+                            && ! button->getBounds().intersects (previous->getBounds());
+                    }
+
+                    check (everyButtonIsThere, "every band has its own button");
+                    check (buttonsDoNotOverlap, "the band buttons stay inside the editor and do not overlap");
+                    check (soloSwitch != nullptr && lastBandButton != nullptr
+                               && lastBandButton->getRight() < soloSwitch->getX(),
+                           "the last band button still fits left of the solo switch");
+
+                    // The knobs have to reach the bands added after the first release.
+                    setParameterValue (editorProcessor, ParamIDs::gain[ParamIDs::numBands - 1], 4.5f);
+                    editor->selectBand (ParamIDs::numBands - 1);
+
+                    check (std::abs (gainSlider->getValue() - 4.5) < 0.01,
+                           "the last band's gain reaches the gain knob");
+
+                    editor->selectBand (0);
+                }
 
                 editor->setSize (900, 760);
                 check (curve->getBounds().getHeight() > 0,

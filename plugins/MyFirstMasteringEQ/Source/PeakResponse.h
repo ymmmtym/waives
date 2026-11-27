@@ -11,7 +11,7 @@
 namespace waives::peak
 {
     /** Number of peaking bands the plugin runs in series. */
-    constexpr int maxBands = 4;
+    constexpr int maxBands = 8;
 
     struct BandSettings
     {

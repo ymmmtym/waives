@@ -28,17 +28,18 @@ namespace
 
     constexpr double secondsOfAudio = 10.0;
 
-    // The two configurations the README reports: one bell, and all four bands
-    // doing work.
+    // The two configurations the README reports: one bell, and every band doing
+    // work. Written out in full so a change to the band count has to be faced
+    // here rather than silently leaving bands at 0 dB.
     struct Scenario
     {
         const char* name;
-        std::array<float, 4> gainDb;
+        std::array<float, waives::peak::maxBands> gainDb;
     };
 
     constexpr Scenario scenarios[] = {
-        { "1 band",  {  6.0f,  0.0f, 0.0f,  0.0f } },
-        { "4 bands", {  6.0f, -4.0f, 3.0f,  2.0f } },
+        { "1 band",   {  6.0f,  0.0f,  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f } },
+        { "8 bands",  {  6.0f, -4.0f,  3.0f, 2.0f, -2.0f, 1.5f, -1.0f, 2.5f } },
     };
 
     // Processes `secondsOfAudio` through the real processor and returns the wall
@@ -97,10 +98,14 @@ int main()
 
     // Spread the bands across the spectrum so each one filters a different
     // region, the way a mastering session uses them.
-    constexpr std::array<float, 4> centreHz { 100.0f, 500.0f, 2000.0f, 8000.0f };
-    constexpr std::array<float, 4> bandQ    { 0.7f, 1.0f, 1.4f, 0.7f };
+    constexpr std::array<float, ParamIDs::numBands> centreHz {
+        60.0f, 120.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f
+    };
+    constexpr std::array<float, ParamIDs::numBands> bandQ {
+        0.7f, 0.8f, 1.0f, 1.0f, 1.0f, 1.2f, 0.9f, 0.7f
+    };
 
-    for (int band = 0; band < 4; ++band)
+    for (int band = 0; band < ParamIDs::numBands; ++band)
     {
         setParameter (ParamIDs::frequency[(size_t) band], centreHz[(size_t) band]);
         setParameter (ParamIDs::q[(size_t) band], bandQ[(size_t) band]);
@@ -111,7 +116,7 @@ int main()
 
     for (const auto& scenario : scenarios)
     {
-        for (int band = 0; band < 4; ++band)
+        for (int band = 0; band < ParamIDs::numBands; ++band)
             setParameter (ParamIDs::gain[(size_t) band], scenario.gainDb[(size_t) band]);
 
         for (const auto& config : configs)
@@ -127,7 +132,12 @@ int main()
     }
 
     std::printf ("\nlatency: %d samples\n", processor.getLatencySamples());
-    std::printf ("stereo in/out, 1 kHz sine; bands at 100 / 500 / 2000 / 8000 Hz\n");
+    std::printf ("stereo in/out, 1 kHz sine; band centres at");
+
+    for (const auto centre : centreHz)
+        std::printf (" %g", (double) centre);
+
+    std::printf (" Hz\n");
 
     return 0;
 }

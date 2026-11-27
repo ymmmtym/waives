@@ -15,18 +15,25 @@ namespace ParamIDs
     inline constexpr int numBands = waives::peak::maxBands;
 
     // Band 1 keeps the unsuffixed IDs released in v0.1.0, so a session saved by
-    // the one-band build restores into band 1 with no migration; bands 2..4
+    // the one-band build restores into band 1 with no migration; bands 2..8
     // append their number.
-    inline constexpr std::array<const char*, numBands> frequency { "freq", "freq2", "freq3", "freq4" };
-    inline constexpr std::array<const char*, numBands> gain      { "gain", "gain2", "gain3", "gain4" };
-    inline constexpr std::array<const char*, numBands> q         { "q",    "q2",    "q3",    "q4" };
+    inline constexpr std::array<const char*, numBands> frequency {
+        "freq", "freq2", "freq3", "freq4", "freq5", "freq6", "freq7", "freq8"
+    };
+    inline constexpr std::array<const char*, numBands> gain {
+        "gain", "gain2", "gain3", "gain4", "gain5", "gain6", "gain7", "gain8"
+    };
+    inline constexpr std::array<const char*, numBands> q {
+        "q", "q2", "q3", "q4", "q5", "q6", "q7", "q8"
+    };
 
     // Added after the first release, so it goes last: hosts match automation by
     // parameter index within the same version hint.
     inline constexpr const char* bypass       = "bypass";
     inline constexpr std::array<const char*, numBands> bandBypass
     {
-        "bypass1", "bypass2", "bypass3", "bypass4"
+        "bypass1", "bypass2", "bypass3", "bypass4",
+        "bypass5", "bypass6", "bypass7", "bypass8"
     };
 }
 
