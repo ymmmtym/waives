@@ -129,10 +129,13 @@ stderr に出るだけで、`| grep error` では成功に見える。テスト�
 - エディタはホストがいつ壊してもおかしくない。`Timer`・非同期コールバック・
   `PopupMenu::showMenuAsync` は **`juce::Component::SafePointer`** を捕まえる
   （`this` を生で捕まえない）。
-- 禁止なのは**オーディオ側のバッファ**、つまり `prepareToPlay()` 済みのプロセッサで
-  `juce::AudioBuffer::setSize()` を呼ぶこと（オーディオスレッドでの確保になる）。
-  エディタ初期化での `juce::Component::setSize()` は普通に必要なので、
-  コンストラクタ / `resized()` で呼んでよい。
+- 禁止なのは**音声処理中のバッファ確保**。つまり `processBlock()` の中（やオーディオ
+  スレッドから間接的に呼ばれる場所）で `juce::AudioBuffer::setSize()` を呼ぶこと。
+  `prepareToPlay()` の中では自由に `setSize()` してよい。ホストはブロックサイズを
+  変えて `prepareToPlay()` を**何度でも呼び直す**ので、そのたびに内部バッファを
+  作り直すのが正しい。
+- エディタ側の `juce::Component::setSize()` は別物で、コンストラクタ / `resized()` で
+  呼んでよい。
 - `ComboBox` は「すでに選ばれている項目」のクリックを報告しない。プリセットの
   再選択が要るなら `TextButton` + `PopupMenu` にする。
 - 色は `PluginEditor.cpp` の先頭にまとめた定数を使い、OS 依存のネイティブ UI を使わない。
