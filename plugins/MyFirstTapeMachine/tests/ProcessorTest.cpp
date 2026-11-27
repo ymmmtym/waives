@@ -168,8 +168,10 @@ namespace
                          double sampleRate, int numChannels, int blockSize,
                          const char* what, bool hostBypass = false)
     {
-        if (! hostBypass)
-            setParameterValue (processor, ParamIDs::bypass, 1.0f);
+        // The two bypass routes are different code, so each check starts from a
+        // known state: the parameter on only for the parameter route, or the
+        // host route would pass without processBlockBypassed() doing anything.
+        setParameterValue (processor, ParamIDs::bypass, hostBypass ? 0.0f : 1.0f);
 
         // The trims belong to the tape path: a bypassed plugin hands back the
         // input it was given, not the input with INPUT and OUTPUT applied.
@@ -187,12 +189,34 @@ namespace
 
         juce::AudioBuffer<float> output (input);
 
+        // The host route is a different entry point, so the check has to call it
+        // rather than lean on the parameter.
+        const auto run = [&] (juce::AudioBuffer<float>& target)
+        {
+            if (! hostBypass)
+            {
+                processAll (processor, target, blockSize);
+                return;
+            }
+
+            juce::MidiBuffer midi;
+
+            for (int start = 0; start < target.getNumSamples(); start += blockSize)
+            {
+                const auto length = juce::jmin (blockSize, target.getNumSamples() - start);
+
+                juce::AudioBuffer<float> view (target.getArrayOfWritePointers(),
+                                               target.getNumChannels(), start, length);
+                processor.processBlockBypassed (view, midi);
+            }
+        };
+
         // Once to settle the bypass fade and fill the delay line, then again on
         // a fresh copy for the comparison.
-        processAll (processor, output, blockSize);
+        run (output);
 
         output.makeCopyOf (input);
-        processAll (processor, output, blockSize);
+        run (output);
 
         bool matches = latency > 0;
 
