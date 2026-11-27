@@ -225,7 +225,8 @@ int main()
                    && hintOf (ParamIDs::q[0]) == 1 && hintOf (ParamIDs::bypass) == 1,
                "band 1 and the bypass switch keep the v0.1.0 version hint");
 
-        const auto hintsAreExpected = [&hintOf] (int firstBand, int endBand, int expected)
+        const auto hintsAreExpected = [&hintOf] (int firstBand, int endBand, int expected,
+                                                 bool includeBypass)
         {
             for (int band = firstBand; band < endBand; ++band)
             {
@@ -234,16 +235,27 @@ int main()
                 if (hintOf (ParamIDs::frequency[index]) != expected
                     || hintOf (ParamIDs::gain[index]) != expected
                     || hintOf (ParamIDs::q[index]) != expected
-                    || hintOf (ParamIDs::bandBypass[index]) != expected)
+                    || (includeBypass && hintOf (ParamIDs::bandBypass[index]) != expected))
                     return false;
             }
 
             return true;
         };
 
-        check (hintsAreExpected (1, 4, 2), "bands 2..4 keep the v0.3.0 version hint");
-        check (hintsAreExpected (4, ParamIDs::numBands, 3),
+        check (hintsAreExpected (1, 4, 2, true), "bands 2..4 keep the v0.3.0 version hint");
+        check (hintsAreExpected (4, ParamIDs::numBands, 3, true),
                "bands 5..8 use a new version hint so older automation does not move");
+
+        // Band 1's bypass shipped in v0.3.0, not with the band itself.
+        check (hintOf (ParamIDs::bandBypass[0]) == 2,
+               "band 1's bypass keeps the v0.3.0 version hint");
+        bool fourBandBypassesOnHint2 = true;
+
+        for (int band = 0; band < 4; ++band)
+            fourBandBypassesOnHint2 = fourBandBypassesOnHint2
+                                   && hintOf (ParamIDs::bandBypass[(size_t) band]) == 2;
+
+        check (fourBandBypassesOnHint2, "the four-band bypasses stay in the v0.3.0 group");
     }
 
     auto* freqParam = apvts.getParameter (ParamIDs::frequency[0]);

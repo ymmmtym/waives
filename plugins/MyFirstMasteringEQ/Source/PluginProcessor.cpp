@@ -88,6 +88,14 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         return band < 4 ? v03BandVersionHint : v04BandVersionHint;
     };
 
+    // Band 1's bypass did not exist in v0.1.0, so unlike the band itself it was
+    // published with hint 2. Moving it to hint 1 would shift it within the AU's
+    // sorted parameter list and hand its automation lane to another parameter.
+    const auto versionHintForBandBypass = [] (int band)
+    {
+        return band < 4 ? v03BandVersionHint : v04BandVersionHint;
+    };
+
     for (int band = 0; band < ParamIDs::numBands; ++band)
     {
         const auto index = (size_t) band;
@@ -125,11 +133,11 @@ MyFirstMasteringEQAudioProcessor::createParameterLayout()
         "Bypass",
         false));
 
-    // Band bypasses follow the band they belong to, so each generation sorts
-    // after everything published before it.
+    // Each generation of band bypasses sorts after everything published before
+    // it.
     for (int band = 0; band < ParamIDs::numBands; ++band)
         layout.add (std::make_unique<juce::AudioParameterBool> (
-            juce::ParameterID { ParamIDs::bandBypass[(size_t) band], versionHintForBand (band) },
+            juce::ParameterID { ParamIDs::bandBypass[(size_t) band], versionHintForBandBypass (band) },
             "Band" + suffixFor (band) + " Bypass",
             false));
 
