@@ -318,21 +318,22 @@ void MyFirstMasteringEQAudioProcessorEditor::resized()
     bypassButton.setBounds (statusRow.removeFromRight (92));
     statusRow.removeFromRight (8);
     presetBox.setBounds (statusRow.removeFromLeft (juce::jmin (170, statusRow.getWidth())));
+    statusRow.removeFromLeft (10);
+    statusLabel.setBounds (statusRow);
 
     area.removeFromTop (6);
 
+    // Eight bands fit beside the two switches at the minimum width, so the row
+    // is laid out left to right and the spare space stays at the end.
     auto bandRow = area.removeFromTop (24);
 
     for (auto& button : bandButtons)
-        button->setBounds (bandRow.removeFromLeft (32).reduced (1));
+        button->setBounds (bandRow.removeFromLeft (30).reduced (1));
 
     bandRow.removeFromLeft (10);
     soloButton.setBounds (bandRow.removeFromLeft (56).reduced (1));
     bandRow.removeFromLeft (4);
     bandBypassButton.setBounds (bandRow.removeFromLeft (80).reduced (1));
-
-    bandRow.removeFromLeft (10);
-    statusLabel.setBounds (bandRow);
 
     area.removeFromTop (8);
 

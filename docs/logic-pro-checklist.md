@@ -78,7 +78,7 @@ cd waives
 4. **Audio Units → MyAudioLab → MyFirstMasteringEQ** が出る
 
 - [ ] 一覧に出てくる
-- [ ] 選ぶとエディタが開く（4 バンドのノブ・グラフ・SOLO / BAND OFF が見える）
+- [ ] 選ぶとエディタが開く（8 バンドのノブ・グラフ・SOLO / BAND OFF が見える）
 
 出てこない場合は、Logic を終了して
 `killall -9 AudioComponentRegistrar` → Logic を再起動。
@@ -126,13 +126,13 @@ Stereo Out で試す場合は、先に **Track → Show Master Track**（`⌘⇧
 マスタートラックを表示しておくと、同じ手順でオートメーションを描ける。
 
 - [ ] パラメータ一覧に `Frequency` / `Gain` / `Q` / `Band Bypass` がバンドごとに出る
-      （4 × 4 バンド + 全体 Bypass = 17 個）
+      （4 × 8 バンド + 全体 Bypass = 33 個）
 - [ ] 描いたオートメーションどおりに音が動く
 - [ ] 再生中にノブが動く（ホスト側の値が UI に反映される）
 
 ## 8. セッションの往復
 
-1. 4 バンドに適当な値を入れ、**SOLO をオンにしたまま**保存する
+1. 8 バンドに適当な値を入れ、**SOLO をオンにしたまま**保存する
 2. Logic を終了して開き直す
 
 - [ ] 全バンドの Frequency / Gain / Q / Band Bypass が復元される
@@ -157,7 +157,7 @@ Stereo Out で試す場合は、先に **Track → Show Master Track**（`⌘⇧
 ## 10. 負荷
 
 - [ ] Stereo Out に 1 インスタンス挿して、CPU メーターがほとんど動かない
-- [ ] 4 バンドすべて +12 dB にしても音切れしない
+- [ ] 8 バンドすべて +12 dB にしても音切れしない
 
 ## 11. 後片付け
 

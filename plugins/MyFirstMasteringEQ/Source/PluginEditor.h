@@ -55,7 +55,7 @@ private:
     juce::Slider gainSlider;
     juce::Slider qSlider;
 
-    std::array<std::unique_ptr<juce::TextButton>, 4> bandButtons;
+    std::array<std::unique_ptr<juce::TextButton>, waives::peak::maxBands> bandButtons;
     juce::TextButton soloButton;
     juce::TextButton bandBypassButton;
     juce::ComboBox presetBox;
