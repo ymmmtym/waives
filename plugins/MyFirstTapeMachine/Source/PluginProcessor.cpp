@@ -428,15 +428,24 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
 
             const auto inputGain = smoothedInputGain.getNextValue();
 
+            // The line holds the input as it arrived: the dry tap is what the
+            // mix knob and the bypass crossfade to, and a bypassed plugin has to
+            // hand back the input, not the input with the trims applied.
             for (int channel = 0; channel < channelsToProcess; ++channel)
-                delayLine.write (channel, buffer.getSample (channel, segmentStart + i) * inputGain);
+                delayLine.write (channel, buffer.getSample (channel, segmentStart + i));
 
             // Read before advancing: the cursor only moves on once both taps
             // have taken their samples, so a delay of `d` is exactly `d`.
             for (int channel = 0; channel < channelsToProcess; ++channel)
             {
+                const auto played = delayLine.read (channel, baseDelaySamples + modulation);
+
+                // Record trim and record-side emphasis belong to the tape path,
+                // and both run at the base rate so the shelf lands where it was
+                // designed to.
                 buffer.setSample (channel, segmentStart + i,
-                                  delayLine.read (channel, baseDelaySamples + modulation));
+                                  preEmphasis[(size_t) channel].processSample (played * inputGain));
+
                 dryTapBuffer.setSample (channel, i,
                                         delayLine.read (channel, baseDelaySamples
                                                                     + (float) oversamplingLatency));
@@ -453,18 +462,6 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                              .getSubBlock ((size_t) segmentStart, (size_t) step);
 
             auto oversampled = oversampling->processSamplesUp (block);
-
-            // Record-side emphasis: the top end is boosted before the tape
-            // saturates it, so the high frequencies are what break up first. The
-            // playback cut after the saturator undoes the boost.
-            for (size_t channel = 0; channel < oversampled.getNumChannels(); ++channel)
-            {
-                auto* samples = oversampled.getChannelPointer (channel);
-                auto& emphasis = preEmphasis[channel];
-
-                for (size_t i = 0; i < oversampled.getNumSamples(); ++i)
-                    samples[i] = emphasis.processSample (samples[i]);
-            }
 
             // 0.05 is a straight line for all practical purposes; 4 compresses a
             // -6 dBFS sine by about 6 dB. The bias grows with drive as well, so
@@ -507,10 +504,11 @@ void MyFirstTapeMachineAudioProcessor::processChunk (juce::AudioBuffer<float>& b
                 value += noiseSources[(size_t) channel].next() * hissGain;
 
                 const auto dryTap = dryTapBuffer.getSample (channel, i);
-                const auto mixed = dryTap + (value - dryTap) * mix;
+                const auto trimmedWet = value * outputGain;
+                const auto mixed = dryTap + (trimmedWet - dryTap) * mix;
                 const auto output = dryTap + (mixed - dryTap) * wetAmount;
 
-                buffer.setSample (channel, segmentStart + i, output * outputGain);
+                buffer.setSample (channel, segmentStart + i, output);
                 waives::dsp::updatePeak (meterLevels[(size_t) channel], std::abs (output));
             }
         }

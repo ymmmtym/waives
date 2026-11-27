@@ -171,6 +171,11 @@ namespace
         if (! hostBypass)
             setParameterValue (processor, ParamIDs::bypass, 1.0f);
 
+        // The trims belong to the tape path: a bypassed plugin hands back the
+        // input it was given, not the input with INPUT and OUTPUT applied.
+        setParameterValue (processor, ParamIDs::input, 6.0f);
+        setParameterValue (processor, ParamIDs::output, -12.0f);
+
         processor.setPlayConfigDetails (numChannels, numChannels, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
 
@@ -533,6 +538,37 @@ int main()
         processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
         processor.prepareToPlay (sampleRate, blockSize);
     }
+
+    //==========================================================================
+    // Meter: it shows what leaves the plugin, so the output trim is in it.
+    {
+        makeDeterministic (processor);
+        setParameterValue (processor, ParamIDs::input, 0.0f);
+        setParameterValue (processor, ParamIDs::output, 12.0f);
+
+        constexpr int meterBlockSize = 512;
+        processor.setPlayConfigDetails (1, 1, sampleRate, meterBlockSize);
+        processor.prepareToPlay (sampleRate, meterBlockSize);
+
+        // The meter holds the peak until it is read, so start from a clean
+        // slate instead of whatever the earlier blocks left behind.
+        processor.getMeterLevel (0);
+
+        auto buffer = makeSine (sampleRate, 1000.0, 1.0, 1);
+        buffer.applyGain (0.25f);
+        processAll (processor, buffer, meterBlockSize);
+
+        const auto peak = processor.getMeterLevel (0);
+        const auto delivered = buffer.getMagnitude (0, 0, buffer.getNumSamples());
+
+        check (peak > 0.0f, "the meter reports a peak at all");
+        check (std::abs (peak - delivered) < 1.0e-4f,
+               "the meter shows the sample after the output trim");
+
+        processor.setPlayConfigDetails (2, 2, sampleRate, blockSize);
+        processor.prepareToPlay (sampleRate, blockSize);
+    }
+
 
     //==========================================================================
     // Smoothing: a knob jump inside a long block still ramps.
